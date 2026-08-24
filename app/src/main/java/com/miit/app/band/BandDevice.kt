@@ -17,6 +17,7 @@ enum class BandConnectionState {
     Scanning,
     Connecting,
     Connected,
+    AwaitingXiaomiBinding,
     Authenticating,
     Authenticated,
     Disconnected,
