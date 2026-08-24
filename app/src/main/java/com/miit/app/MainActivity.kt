@@ -1,11 +1,11 @@
 package com.miit.app
 
 import android.Manifest
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,7 +18,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -32,6 +31,9 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.miit.app.band.BandConnectionState
+import com.miit.app.band.BandDevice
+import com.miit.app.band.BandScanner
 
 class MainActivity : ComponentActivity() {
     private val permissions = registerForActivityResult(
@@ -40,9 +42,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (android.os.Build.VERSION.SDK_INT >= 31) {
-            permissions.launch(arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT))
+        val requested = if (Build.VERSION.SDK_INT >= 31) {
+            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         }
+        permissions.launch(requested)
         setContent { MiitApp() }
     }
 }
@@ -80,25 +85,41 @@ fun MiitApp() {
 
 @Composable
 private fun HomeScreen(onEditor: () -> Unit) {
-    var connected by remember { mutableStateOf(false) }
-    var deviceName by remember { mutableStateOf("No band connected") }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scanner = remember { BandScanner(context) }
+    val devices by scanner.devices.collectAsState()
+    val state by scanner.state.collectAsState()
     val saved = remember { mutableStateListOf("My first watchface", "Minimal digital") }
+
+    DisposableEffect(Unit) { onDispose { scanner.close() } }
 
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text(if (connected) deviceName else "Mi Band not connected", style = MaterialTheme.typography.titleMedium)
+                    Text("Mi Band connection", style = MaterialTheme.typography.titleLarge)
                     Spacer(Modifier.height(6.dp))
-                    Text(if (connected) "Ready for compatible watchface operations" else "Connect a band to detect model, region and firmware.")
+                    Text(connectionMessage(state))
                     Spacer(Modifier.height(12.dp))
-                    Button(onClick = {
-                        connected = true
-                        deviceName = "Mi Band • detected device"
-                    }) { Text(if (connected) "Refresh device" else "Connect band") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { scanner.startScan() }) {
+                            Text(if (state == BandConnectionState.Scanning) "Scanning…" else "Scan for band")
+                        }
+                        if (state == BandConnectionState.Scanning) {
+                            Button(onClick = { scanner.stopScan() }) { Text("Stop") }
+                        }
+                    }
                 }
             }
         }
+
+        if (devices.isNotEmpty()) {
+            item { Text("Detected bands", style = MaterialTheme.typography.titleLarge) }
+            items(devices, key = { it.address }) { device ->
+                BandDeviceCard(device = device, onConnect = { scanner.connect(device) })
+            }
+        }
+
         item { Text("My displays", style = MaterialTheme.typography.titleLarge) }
         items(saved) { name ->
             Card(Modifier.fillMaxWidth()) {
@@ -108,10 +129,35 @@ private fun HomeScreen(onEditor: () -> Unit) {
                 }
             }
         }
-        item {
-            Button(onClick = onEditor, Modifier.fillMaxWidth()) { Text("＋ Create from scratch") }
+        item { Button(onClick = onEditor, Modifier.fillMaxWidth()) { Text("＋ Create from scratch") } }
+    }
+}
+
+@Composable
+private fun BandDeviceCard(device: BandDevice, onConnect: () -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(device.name, style = MaterialTheme.typography.titleMedium)
+            Text("Signal: ${device.rssi} dBm")
+            Text("Address: ${device.address}")
+            device.model?.let { Text("Model: $it") }
+            device.firmware?.let { Text("Firmware: $it") }
+            device.manufacturer?.let { Text("Manufacturer: $it") }
+            Spacer(Modifier.height(6.dp))
+            Button(onClick = onConnect) { Text("Connect") }
         }
     }
+}
+
+private fun connectionMessage(state: BandConnectionState): String = when (state) {
+    BandConnectionState.Idle -> "Ready to scan for nearby Mi Band / Xiaomi Smart Band devices."
+    BandConnectionState.Scanning -> "Scanning… keep the band nearby and awake."
+    BandConnectionState.Connecting -> "Connecting to the selected band…"
+    BandConnectionState.Connected -> "Connected. Reading available device information."
+    BandConnectionState.Authenticating -> "Connected. Preparing authentication protocol."
+    BandConnectionState.Authenticated -> "Authenticated and ready."
+    BandConnectionState.Disconnected -> "Band disconnected."
+    BandConnectionState.Error -> "Bluetooth operation failed. Check Bluetooth and permissions, then try again."
 }
 
 @Composable
@@ -124,11 +170,11 @@ private fun EditorScreen() {
             Column(Modifier.fillMaxSize().padding(16.dp)) {
                 Text("Canvas preview", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(12.dp))
-                Column(Modifier.fillMaxWidth().weight(1f).background(MaterialTheme.colorScheme.surfaceVariant).padding(24.dp)) {
+                Column(Modifier.fillMaxWidth().weight(1f).padding(24.dp)) {
                     Text("12:45", style = MaterialTheme.typography.displayLarge)
                     Text("Tuesday  •  25 Aug")
                     Spacer(Modifier.height(20.dp))
-                    Text("❤️ 72   •   6,421 steps")
+                    Text("♥ 72   •   6,421 steps")
                 }
             }
         }
