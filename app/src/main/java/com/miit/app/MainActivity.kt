@@ -1,8 +1,12 @@
 package com.miit.app
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,14 +38,16 @@ import androidx.navigation.compose.rememberNavController
 import com.miit.app.band.BandConnectionState
 import com.miit.app.band.BandDevice
 import com.miit.app.band.BandScanner
+import com.miit.app.band.MiitTestLog
 
 class MainActivity : ComponentActivity() {
-    private val permissions = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { }
+    private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        MiitTestLog.add("Permissions result: ${result.entries.joinToString { "${it.key}=${it.value}" }}")
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        MiitTestLog.add("App started")
         val requested = if (Build.VERSION.SDK_INT >= 31) {
             arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
         } else {
@@ -57,19 +63,13 @@ fun MiitApp() {
     val nav = rememberNavController()
     var selected by remember { mutableIntStateOf(0) }
     val routes = listOf("home", "editor", "settings")
-
     MaterialTheme {
         Scaffold(
             topBar = { TopAppBar(title = { Text("Miit") }) },
             bottomBar = {
                 NavigationBar {
                     listOf("Band", "Editor", "Settings").forEachIndexed { index, label ->
-                        NavigationBarItem(
-                            selected = selected == index,
-                            onClick = { selected = index; nav.navigate(routes[index]) },
-                            icon = { Text(listOf("⌚", "✎", "⚙")[index]) },
-                            label = { Text(label) }
-                        )
+                        NavigationBarItem(selected = selected == index, onClick = { selected = index; nav.navigate(routes[index]) }, icon = { Text(listOf("⌚", "✎", "⚙")[index]) }, label = { Text(label) })
                     }
                 }
             }
@@ -90,7 +90,6 @@ private fun HomeScreen(onEditor: () -> Unit) {
     val devices by scanner.devices.collectAsState()
     val state by scanner.state.collectAsState()
     val saved = remember { mutableStateListOf("My first watchface", "Minimal digital") }
-
     DisposableEffect(Unit) { onDispose { scanner.close() } }
 
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -102,33 +101,30 @@ private fun HomeScreen(onEditor: () -> Unit) {
                     Text(connectionMessage(state))
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { scanner.startScan() }) {
-                            Text(if (state == BandConnectionState.Scanning) "Scanning…" else "Scan for band")
-                        }
-                        if (state == BandConnectionState.Scanning) {
-                            Button(onClick = { scanner.stopScan() }) { Text("Stop") }
-                        }
+                        Button(onClick = { MiitTestLog.add("User tapped Scan for band"); scanner.startScan() }) { Text(if (state == BandConnectionState.Scanning) "Scanning…" else "Scan for band") }
+                        if (state == BandConnectionState.Scanning) Button(onClick = { MiitTestLog.add("User tapped Stop scan"); scanner.stopScan() }) { Text("Stop") }
                     }
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = {
+                            val log = MiitTestLog.text(context)
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("Miit testing logs", log))
+                            Toast.makeText(context, "Testing log copied. Paste it into ChatGPT.", Toast.LENGTH_LONG).show()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("📋 Copy testing logs") }
+                    Spacer(Modifier.height(6.dp))
+                    Button(onClick = { MiitTestLog.clear(); Toast.makeText(context, "Testing log cleared", Toast.LENGTH_SHORT).show() }, modifier = Modifier.fillMaxWidth()) { Text("Clear testing logs") }
                 }
             }
         }
-
         if (devices.isNotEmpty()) {
             item { Text("Detected bands", style = MaterialTheme.typography.titleLarge) }
-            items(devices, key = { it.address }) { device ->
-                BandDeviceCard(device = device, onConnect = { scanner.connect(device) })
-            }
+            items(devices, key = { it.address }) { device -> BandDeviceCard(device = device, onConnect = { MiitTestLog.add("User tapped Connect: ${device.name} (${device.address})"); scanner.connect(device) }) }
         }
-
         item { Text("My displays", style = MaterialTheme.typography.titleLarge) }
-        items(saved) { name ->
-            Card(Modifier.fillMaxWidth()) {
-                Row(Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(name)
-                    Button(onClick = onEditor) { Text("Edit") }
-                }
-            }
-        }
+        items(saved) { name -> Card(Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(name); Button(onClick = onEditor) { Text("Edit") } } } }
         item { Button(onClick = onEditor, Modifier.fillMaxWidth()) { Text("＋ Create from scratch") } }
     }
 }
@@ -166,29 +162,11 @@ private fun EditorScreen() {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("Watchface editor", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(12.dp))
-        Card(Modifier.fillMaxWidth().weight(1f)) {
-            Column(Modifier.fillMaxSize().padding(16.dp)) {
-                Text("Canvas preview", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(12.dp))
-                Column(Modifier.fillMaxWidth().weight(1f).padding(24.dp)) {
-                    Text("12:45", style = MaterialTheme.typography.displayLarge)
-                    Text("Tuesday  •  25 Aug")
-                    Spacer(Modifier.height(20.dp))
-                    Text("♥ 72   •   6,421 steps")
-                }
-            }
-        }
+        Card(Modifier.fillMaxWidth().weight(1f)) { Column(Modifier.fillMaxSize().padding(16.dp)) { Text("Canvas preview", style = MaterialTheme.typography.titleMedium); Spacer(Modifier.height(12.dp)); Column(Modifier.fillMaxWidth().weight(1f).padding(24.dp)) { Text("12:45", style = MaterialTheme.typography.displayLarge); Text("Tuesday  •  25 Aug"); Spacer(Modifier.height(20.dp)); Text("♥ 72   •   6,421 steps") } } }
         Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("Select", "Text", "Image", "Shape", "AI", "Font").forEach { t ->
-                FilterChip(selected = tool == t, onClick = { tool = t }, label = { Text(t) })
-            }
-        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("Select", "Text", "Image", "Shape", "AI", "Font").forEach { t -> FilterChip(selected = tool == t, onClick = { tool = t }, label = { Text(t) }) } }
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = {}) { Text("Save") }
-            Button(onClick = {}) { Text("Send to band") }
-        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = {}) { Text("Save") }; Button(onClick = {}) { Text("Send to band") } }
     }
 }
 
@@ -196,26 +174,8 @@ private fun EditorScreen() {
 private fun SettingsScreen() {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Settings", style = MaterialTheme.typography.headlineSmall)
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Text("AI providers", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(6.dp))
-                Text("Add your own API keys. Miit will keep provider configuration local to the device.")
-                Spacer(Modifier.height(12.dp))
-                listOf("Local / offline AI", "OpenAI-compatible API", "Google AI-compatible API").forEach { Text("• $it") }
-            }
-        }
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Text("Fonts", style = MaterialTheme.typography.titleMedium)
-                Text("Use Android/device fonts, imported font files, and Google Fonts where licensing permits.")
-            }
-        }
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Text("Compatibility", style = MaterialTheme.typography.titleMedium)
-                Text("Device-specific communication and compiler modules are designed to be replaceable per band family and firmware format.")
-            }
-        }
+        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text("AI providers", style = MaterialTheme.typography.titleMedium); Spacer(Modifier.height(6.dp)); Text("Add your own API keys. Miit will keep provider configuration local to the device."); Spacer(Modifier.height(12.dp)); listOf("Local / offline AI", "OpenAI-compatible API", "Google AI-compatible API").forEach { Text("• $it") } } }
+        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text("Fonts", style = MaterialTheme.typography.titleMedium); Text("Use Android/device fonts, imported font files, and Google Fonts where licensing permits.") } }
+        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text("Compatibility", style = MaterialTheme.typography.titleMedium); Text("Device-specific communication and compiler modules are designed to be replaceable per band family and firmware format.") } }
     }
 }
