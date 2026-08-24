@@ -1,11 +1,10 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path android:fillColor="#FF6900" android:pathData="M8,0 L100,0 Q108,0 108,8 L108,100 Q108,108 100,108 L8,108 Q0,108 0,100 L0,8 Q0,0 8,0 Z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M23,28 L35,28 L35,67 L23,67 Z M42,28 L54,28 L54,67 L42,67 Z M61,28 L73,28 L73,67 L61,67 Z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M20,72 L77,72 L77,79 L20,79 Z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M77,68 L91,54 L96,59 L82,73 Z M74,75 L76,68 L82,74 Z" />
-    <path android:fillColor="#FF6900" android:pathData="M84,60 L91,53 L96,58 L89,65 Z" />
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#121212" android:pathData="M0,20 C0,9 9,0 20,0 L88,0 C99,0 108,9 108,20 L108,88 C108,99 99,108 88,108 L20,108 C9,108 0,99 0,88 Z"/>
+    <path android:fillColor="#252525" android:pathData="M41,12 L67,12 C73,12 77,17 77,23 L77,85 C77,91 73,96 67,96 L41,96 C35,96 31,91 31,85 L31,23 C31,17 35,12 41,12 Z"/>
+    <path android:fillColor="#050505" android:pathData="M42,18 L66,18 C70,18 73,22 73,26 L73,81 C73,85 70,89 66,89 L42,89 C38,89 35,85 35,81 L35,26 C35,22 38,18 42,18 Z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M40,48 L43,48 L43,59 L46,55 L49,59 L49,48 L52,48 L52,66 L49,66 L46,62 L43,66 L40,66 Z"/>
+    <path android:fillColor="#FF9800" android:pathData="M54,51 L57,51 L57,66 L54,66 Z M54,46 L57,46 L57,49 L54,49 Z"/>
+    <path android:fillColor="#FF9800" android:pathData="M60,51 L63,51 L63,66 L60,66 Z M60,46 L63,46 L63,49 L60,49 Z"/>
+    <path android:fillColor="#FF9800" android:pathData="M68,49 L72,47 L75,49 L73,52 L72,52 L70,66 L67,66 Z"/>
+    <path android:fillColor="#FF9800" android:pathData="M68,68 L75,68 L75,70 L68,70 Z"/>
 </vector>
