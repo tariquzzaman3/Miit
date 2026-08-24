@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -49,11 +50,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         MiitTestLog.add("App started")
-        val requested = if (Build.VERSION.SDK_INT >= 31) {
-            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-        } else {
-            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
+        val requested = if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT) else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         permissions.launch(requested)
         setContent { MiitApp() }
     }
@@ -68,13 +65,7 @@ fun MiitApp() {
     MaterialTheme {
         Scaffold(
             topBar = { TopAppBar(title = { Text("Miit") }) },
-            bottomBar = {
-                NavigationBar {
-                    listOf("Band", "Editor", "Settings").forEachIndexed { index, label ->
-                        NavigationBarItem(selected = selected == index, onClick = { selected = index; nav.navigate(routes[index]) }, icon = { Text(listOf("⌚", "✎", "⚙")[index]) }, label = { Text(label) })
-                    }
-                }
-            }
+            bottomBar = { NavigationBar { listOf("Band", "Editor", "Settings").forEachIndexed { index, label -> NavigationBarItem(selected = selected == index, onClick = { selected = index; nav.navigate(routes[index]) }, icon = { Text(listOf("⌚", "✎", "⚙")[index]) }, label = { Text(label) }) } } }
         ) { padding ->
             NavHost(navController = nav, startDestination = "home", modifier = Modifier.padding(padding)) {
                 composable("home") { HomeScreen(onEditor = { selected = 1; nav.navigate("editor") }) }
@@ -87,7 +78,7 @@ fun MiitApp() {
 
 @Composable
 private fun HomeScreen(onEditor: () -> Unit) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val scanner = remember { BandScanner(context) }
     val devices by scanner.devices.collectAsState()
     val state by scanner.state.collectAsState()
@@ -107,15 +98,7 @@ private fun HomeScreen(onEditor: () -> Unit) {
                         if (state == BandConnectionState.Scanning) Button(onClick = { MiitTestLog.add("User tapped Stop scan"); scanner.stopScan() }) { Text("Stop") }
                     }
                     Spacer(Modifier.height(12.dp))
-                    Button(
-                        onClick = {
-                            val log = MiitTestLog.text(context)
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("Miit testing logs", log))
-                            Toast.makeText(context, "Testing log copied. Paste it into ChatGPT.", Toast.LENGTH_LONG).show()
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("📋 Copy testing logs") }
+                    Button(onClick = { val log = MiitTestLog.text(context); val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager; clipboard.setPrimaryClip(ClipData.newPlainText("Miit testing logs", log)); Toast.makeText(context, "Testing log copied. Paste it into ChatGPT.", Toast.LENGTH_LONG).show() }, modifier = Modifier.fillMaxWidth()) { Text("📋 Copy testing logs") }
                     Spacer(Modifier.height(6.dp))
                     Button(onClick = { MiitTestLog.clear(); Toast.makeText(context, "Testing log cleared", Toast.LENGTH_SHORT).show() }, modifier = Modifier.fillMaxWidth()) { Text("Clear testing logs") }
                 }
@@ -150,9 +133,10 @@ private fun BandDeviceCard(device: BandDevice, onConnect: () -> Unit) {
 private fun connectionMessage(state: BandConnectionState): String = when (state) {
     BandConnectionState.Idle -> "Ready to scan for nearby Mi Band / Xiaomi Smart Band devices."
     BandConnectionState.Scanning -> "Scanning… keep the band nearby and awake."
-    BandConnectionState.Connecting -> "Connecting to the selected band…"
-    BandConnectionState.Connected -> "Connected. Reading available device information."
-    BandConnectionState.Authenticating -> "Connected. Preparing authentication protocol."
+    BandConnectionState.Connecting -> "Connecting / completing Android pairing…"
+    BandConnectionState.Connected -> "Android Bluetooth connection is active."
+    BandConnectionState.AwaitingXiaomiBinding -> "Android pairing is complete. Xiaomi binding/authentication is the next step."
+    BandConnectionState.Authenticating -> "Authenticating with the band…"
     BandConnectionState.Authenticated -> "Authenticated and ready."
     BandConnectionState.Disconnected -> "Band disconnected."
     BandConnectionState.Error -> "Bluetooth operation failed. Check Bluetooth and permissions, then try again."
