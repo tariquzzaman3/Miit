@@ -2,6 +2,7 @@ package com.miit.app.band
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
@@ -37,6 +38,7 @@ class BandScanner(context: Context) {
     fun startScan() {
         if (adapter?.isEnabled != true || scanner == null) { _state.value = BandConnectionState.Error; return }
         stopScan(); _devices.value = emptyList(); _state.value = BandConnectionState.Scanning
+        MiitTestLog.add("BLE scan started")
         scanCallback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 val device = result.device
@@ -45,7 +47,7 @@ class BandScanner(context: Context) {
                 val item = BandDevice(name, device.address, result.rssi)
                 _devices.value = (_devices.value.filterNot { it.address == item.address } + item).sortedByDescending { it.rssi }
             }
-            override fun onScanFailed(errorCode: Int) { _state.value = BandConnectionState.Error }
+            override fun onScanFailed(errorCode: Int) { MiitTestLog.add("BLE scan failed: error=$errorCode"); _state.value = BandConnectionState.Error }
         }
         scanner?.startScan(scanCallback)
     }
@@ -63,20 +65,42 @@ class BandScanner(context: Context) {
     fun connect(device: BandDevice, authKey: ByteArray?) {
         stopScan()
         val remote = adapter?.getRemoteDevice(device.address) ?: run { _state.value = BandConnectionState.Error; return }
-        gatt?.close(); _state.value = BandConnectionState.Connecting
-        gatt = remote.connectGatt(appContext, false, callback(authKey))
+        gatt?.close(); gatt = null
+
+        // Band 8/9/10 binding begins with Android BLE bonding. The band can display
+        // a confirmation prompt while Android waits for the bond to complete.
+        if (remote.bondState == BluetoothDevice.BOND_NONE) {
+            MiitTestLog.add("Starting Android Bluetooth bond request for ${device.address}")
+            val bondStarted = remote.createBond()
+            MiitTestLog.add("createBond() returned: $bondStarted")
+        } else {
+            MiitTestLog.add("Bluetooth bond already present: ${bondStateName(remote.bondState)}")
+        }
+
+        _state.value = BandConnectionState.Connecting
+        MiitTestLog.add("Opening GATT connection to ${device.address}")
+        gatt = remote.connectGatt(appContext, false, callback(authKey), BluetoothDevice.TRANSPORT_LE)
+    }
+
+    private fun bondStateName(state: Int): String = when (state) {
+        BluetoothDevice.BOND_NONE -> "NONE"
+        BluetoothDevice.BOND_BONDING -> "BONDING"
+        BluetoothDevice.BOND_BONDED -> "BONDED"
+        else -> "UNKNOWN"
     }
 
     private fun callback(authKey: ByteArray?) = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+            MiitTestLog.add("GATT state: status=$status newState=$newState")
             if (status != BluetoothGatt.GATT_SUCCESS) { _state.value = BandConnectionState.Error; g.close(); return }
             when (newState) {
-                BluetoothProfile.STATE_CONNECTED -> { _state.value = BandConnectionState.Connected; g.discoverServices() }
+                BluetoothProfile.STATE_CONNECTED -> { _state.value = BandConnectionState.Connected; MiitTestLog.add("GATT connected; discovering services"); g.discoverServices() }
                 BluetoothProfile.STATE_DISCONNECTED -> _state.value = BandConnectionState.Disconnected
             }
         }
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+            MiitTestLog.add("GATT services discovered: status=$status count=${g.services.size}")
             if (status != BluetoothGatt.GATT_SUCCESS) { _state.value = BandConnectionState.Error; return }
             readDeviceInformation(g)
             val auth = MiBandProtocol.findAuthenticationCharacteristic(g)
@@ -84,10 +108,12 @@ class BandScanner(context: Context) {
                 enableNotification(g, auth)
                 _state.value = BandConnectionState.Authenticating
                 authenticator = MiBandAuthenticator(authKey) { ok, _ ->
+                    MiitTestLog.add("Classic authentication result: $ok")
                     _state.value = if (ok) BandConnectionState.Authenticated else BandConnectionState.Error
                 }
                 authenticator?.begin(g, auth)
             } else {
+                MiitTestLog.add("No classic FEE1 auth started; Band 8+ needs Xiaomi binding/auth flow")
                 _state.value = BandConnectionState.Connected
             }
         }
@@ -140,6 +166,7 @@ class BandScanner(context: Context) {
             else -> current
         }
         _devices.value = _devices.value.map { if (it.address == address) updated else it }
+        if (value.isNotBlank()) MiitTestLog.add("Device info ${uuid}: ${value.take(120)}")
     }
 
     fun close() { stopScan(); gatt?.close(); gatt = null; authenticator = null; _state.value = BandConnectionState.Idle }
