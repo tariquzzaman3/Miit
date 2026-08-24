@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.BluetoothLeScanner
@@ -56,11 +57,9 @@ class BandScanner(context: Context) {
         if (_state.value == BandConnectionState.Scanning) _state.value = BandConnectionState.Idle
     }
 
-    /** Connect without authentication. Useful for discovery and bands exposing standard GATT info. */
     @SuppressLint("MissingPermission")
     fun connect(device: BandDevice) = connect(device, null)
 
-    /** Connect and, for classic FEE1 devices, run the Huami three-stage authentication. */
     @SuppressLint("MissingPermission")
     fun connect(device: BandDevice, authKey: ByteArray?) {
         stopScan()
@@ -96,9 +95,7 @@ class BandScanner(context: Context) {
         }
 
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-            if (characteristic.uuid == MiBandProtocol.AUTH_CHARACTERISTIC) {
-                authenticator?.onNotification(g, characteristic, value)
-            }
+            if (characteristic.uuid == MiBandProtocol.AUTH_CHARACTERISTIC) authenticator?.onNotification(g, characteristic, value)
         }
 
         @Suppress("DEPRECATION")
@@ -119,28 +116,21 @@ class BandScanner(context: Context) {
     private fun enableNotification(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
         gatt.setCharacteristicNotification(characteristic, true)
         val descriptor = characteristic.getDescriptor(CLIENT_CONFIG_DESCRIPTOR) ?: return
-        @Suppress("DEPRECATION")
-        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-        @Suppress("DEPRECATION")
-        gatt.writeDescriptor(descriptor)
+        @Suppress("DEPRECATION") descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        @Suppress("DEPRECATION") gatt.writeDescriptor(descriptor)
     }
 
     @SuppressLint("MissingPermission")
     private fun readDeviceInformation(gatt: BluetoothGatt) {
         pendingReads.clear()
         val service = gatt.getService(DEVICE_INFORMATION_SERVICE) ?: return
-        listOf(MODEL_NUMBER_UUID, FIRMWARE_UUID, MANUFACTURER_UUID).forEach { uuid ->
-            service.getCharacteristic(uuid)?.let { pendingReads.add(it) }
-        }
+        listOf(MODEL_NUMBER_UUID, FIRMWARE_UUID, MANUFACTURER_UUID).forEach { uuid -> service.getCharacteristic(uuid)?.let { pendingReads.add(it) } }
         readNextDeviceInfo(gatt)
     }
 
     private val pendingReads = ArrayDeque<BluetoothGattCharacteristic>()
     @SuppressLint("MissingPermission")
-    private fun readNextDeviceInfo(gatt: BluetoothGatt) {
-        val next = pendingReads.removeFirstOrNull() ?: return
-        gatt.readCharacteristic(next)
-    }
+    private fun readNextDeviceInfo(gatt: BluetoothGatt) { pendingReads.removeFirstOrNull()?.let { gatt.readCharacteristic(it) } }
 
     private fun updateDeviceInfo(uuid: UUID, value: String) {
         val address = gatt?.device?.address ?: return
