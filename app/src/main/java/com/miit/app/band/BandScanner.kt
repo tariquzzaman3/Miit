@@ -32,7 +32,6 @@ class BandScanner(context: Context) {
     private var scanCallback: ScanCallback? = null
     private var gatt: BluetoothGatt? = null
     private var authenticator: MiBandAuthenticator? = null
-    private var authCharacteristic: BluetoothGattCharacteristic? = null
 
     @SuppressLint("MissingPermission")
     fun startScan() {
@@ -80,8 +79,7 @@ class BandScanner(context: Context) {
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) { _state.value = BandConnectionState.Error; return }
             readDeviceInformation(g)
-            val auth = g.getService(MiBandProtocol.FEE1_SERVICE)?.getCharacteristic(MiBandProtocol.AUTH_CHARACTERISTIC)
-            authCharacteristic = auth
+            val auth = MiBandProtocol.findAuthenticationCharacteristic(g)
             if (auth != null && authKey != null && authKey.size == 16) {
                 enableNotification(g, auth)
                 _state.value = BandConnectionState.Authenticating
@@ -95,7 +93,7 @@ class BandScanner(context: Context) {
         }
 
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-            if (characteristic.uuid == MiBandProtocol.AUTH_CHARACTERISTIC) authenticator?.onNotification(g, characteristic, value)
+            if (characteristic.uuid == MiBandProtocol.CHARACTERISTIC_AUTH) authenticator?.onNotification(g, characteristic, value)
         }
 
         @Suppress("DEPRECATION")
@@ -144,7 +142,7 @@ class BandScanner(context: Context) {
         _devices.value = _devices.value.map { if (it.address == address) updated else it }
     }
 
-    fun close() { stopScan(); gatt?.close(); gatt = null; authenticator = null; authCharacteristic = null; _state.value = BandConnectionState.Idle }
+    fun close() { stopScan(); gatt?.close(); gatt = null; authenticator = null; _state.value = BandConnectionState.Idle }
 
     private fun isLikelyMiBand(name: String): Boolean {
         val n = name.lowercase()
