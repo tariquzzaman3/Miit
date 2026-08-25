@@ -19,8 +19,7 @@ android {
     buildFeatures { compose = true }
 
     sourceSets["main"].apply {
-        java.srcDirs(".")
-        java.exclude("build/**", ".gradle/**")
+        java.setSrcDirs(listOf("band", "core"))
         manifest.srcFile("AndroidManifest.xml")
     }
 }
