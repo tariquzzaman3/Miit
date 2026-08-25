@@ -11,6 +11,10 @@ permissions:
 env:
   GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx2048m
 
+defaults:
+  run:
+    working-directory: miit
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -37,5 +41,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: miit-debug-apk
-          path: '**/build/outputs/apk/debug/*.apk'
+          path: 'miit/**/build/outputs/apk/debug/*.apk'
           if-no-files-found: error
