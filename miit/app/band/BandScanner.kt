@@ -246,7 +246,7 @@ class BandScanner(context: Context) {
             pendingMtuForAuth = false
             val characteristic = pendingXiaomiAuth?.takeIf { it.first === g }?.second ?: return
             if (status != BluetoothGatt.GATT_SUCCESS) {
-                MiitTestLog.add("Xiaomi auth: MTU negotiation failed; continuing with current MTU=${mtu}")
+                MiitTestLog.add("Xiaomi auth: MTU negotiation failed; continuing with current MTU=$mtu")
             }
             enableAuthenticationNotification(g, characteristic)
         }
