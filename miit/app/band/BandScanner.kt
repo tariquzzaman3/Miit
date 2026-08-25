@@ -12,10 +12,6 @@ import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,6 +36,8 @@ class BandScanner(context: Context) {
     private var activeAddress: String? = null
     private var pendingXiaomiAuth: Pair<BluetoothGatt, BluetoothGattCharacteristic>? = null
     private var pendingClassicAuth: Pair<BluetoothGatt, BluetoothGattCharacteristic>? = null
+    private var pendingMtuForAuth = false
+    private var pendingAuthNotificationEnabled = false
 
     private val bondReceiver = object : BroadcastReceiver() {
         @SuppressLint("MissingPermission") override fun onReceive(context: Context, intent: Intent) {
@@ -151,6 +149,8 @@ class BandScanner(context: Context) {
             return
         }
         _state.value = BandConnectionState.Connecting
+        pendingMtuForAuth = false
+        pendingAuthNotificationEnabled = false
         MiitTestLog.add("Opening GATT connection to ${device.address} after bond is ready")
         gatt = remote.connectGatt(appContext, false, callback(authKey), BluetoothDevice.TRANSPORT_LE)
     }
@@ -165,6 +165,8 @@ class BandScanner(context: Context) {
                     gatt = null
                     activeAddress = null
                     activeAuthKey = null
+                    pendingMtuForAuth = false
+                    pendingAuthNotificationEnabled = false
                 }
                 return
             }
@@ -185,6 +187,8 @@ class BandScanner(context: Context) {
                         xiaomiAuthenticator = null
                         pendingXiaomiAuth = null
                         pendingClassicAuth = null
+                        pendingMtuForAuth = false
+                        pendingAuthNotificationEnabled = false
                     }
                 }
             }
@@ -211,12 +215,23 @@ class BandScanner(context: Context) {
                 }
                 pendingXiaomiAuth = g to xiaomiAuth
                 _state.value = BandConnectionState.Authenticating
-                enableNotification(g, xiaomiAuth)
+                pendingMtuForAuth = true
+                pendingAuthNotificationEnabled = false
+                MiitTestLog.add("Xiaomi auth: requesting MTU 512 before handshake")
+                @SuppressLint("MissingPermission")
+                val mtuRequested = g.requestMtu(512)
+                MiitTestLog.add("Xiaomi auth: requestMtu(512)=$mtuRequested")
+                if (!mtuRequested) {
+                    MiitTestLog.add("Xiaomi auth: MTU request rejected; continuing with current MTU")
+                    pendingMtuForAuth = false
+                    enableAuthenticationNotification(g, xiaomiAuth)
+                }
                 return
             }
             if (classicAuth != null && authKey != null && authKey.size == 16) {
                 pendingClassicAuth = g to classicAuth
                 _state.value = BandConnectionState.Authenticating
+                pendingAuthNotificationEnabled = false
                 enableNotification(g, classicAuth)
             } else if (MiBandProtocol.hasClassicMiBandServices(g)) {
                 MiitTestLog.add("Classic FEE0/FEE1 protocol detected; no auth key supplied")
@@ -227,6 +242,14 @@ class BandScanner(context: Context) {
             }
         }
 
+        override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+            MiitTestLog.add("MTU changed: mtu=$mtu status=$status")
+            if (!pendingMtuForAuth || status != BluetoothGatt.GATT_SUCCESS || g !== gatt) return
+            pendingMtuForAuth = false
+            val characteristic = pendingXiaomiAuth?.takeIf { it.first === g }?.second ?: return
+            enableAuthenticationNotification(g, characteristic)
+        }
+
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             if (descriptor.uuid != CLIENT_CONFIG_DESCRIPTOR) return
             if (status != BluetoothGatt.GATT_SUCCESS) {
@@ -235,6 +258,7 @@ class BandScanner(context: Context) {
                 return
             }
             MiitTestLog.add("Authentication notifications enabled")
+            pendingAuthNotificationEnabled = true
             pendingXiaomiAuth?.takeIf { it.first === g }?.let { (gg, c) ->
                 pendingXiaomiAuth = null
                 val key = activeAuthKey
@@ -247,7 +271,8 @@ class BandScanner(context: Context) {
                     _state.value = if (ok) BandConnectionState.Authenticated else BandConnectionState.Error
                     MiitTestLog.add(if (ok) "Xiaomi auth: initialized" else "Xiaomi auth failed: ${error ?: "unknown error"}")
                 }
-                xiaomiAuthenticator?.start(gg, c)
+                val started = xiaomiAuthenticator?.start(gg, c) == true
+                MiitTestLog.add("Xiaomi auth: start_result=$started")
             }
             pendingClassicAuth?.takeIf { it.first === g }?.let { (gg, c) ->
                 pendingClassicAuth = null
@@ -258,6 +283,12 @@ class BandScanner(context: Context) {
                 }
                 authenticator = MiBandAuthenticator(key) { ok, _ -> _state.value = if (ok) BandConnectionState.Authenticated else BandConnectionState.Error }
                 authenticator?.begin(gg, c)
+            }
+        }
+
+        override fun onCharacteristicWrite(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            if (characteristic.uuid == XIAOMI_COMMAND) {
+                MiitTestLog.add("Xiaomi auth write completed: status=$status")
             }
         }
 
@@ -278,12 +309,24 @@ class BandScanner(context: Context) {
         }
     }
 
-    @SuppressLint("MissingPermission") private fun enableNotification(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic): Boolean {
-        if (!gatt.setCharacteristicNotification(characteristic, true)) return false
-        val descriptor = characteristic.getDescriptor(CLIENT_CONFIG_DESCRIPTOR) ?: return false
+    @SuppressLint("MissingPermission") private fun enableAuthenticationNotification(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic): Boolean {
+        if (!gatt.setCharacteristicNotification(characteristic, true)) {
+            MiitTestLog.add("Authentication notification setup failed: setCharacteristicNotification=false")
+            return false
+        }
+        val descriptor = characteristic.getDescriptor(CLIENT_CONFIG_DESCRIPTOR) ?: run {
+            MiitTestLog.add("Authentication notification setup failed: CCCD missing")
+            return false
+        }
         @Suppress("DEPRECATION") descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-        @Suppress("DEPRECATION") return gatt.writeDescriptor(descriptor)
+        @Suppress("DEPRECATION") val queued = gatt.writeDescriptor(descriptor)
+        MiitTestLog.add("Authentication notification CCCD write requested=$queued")
+        if (!queued) _state.value = BandConnectionState.Error
+        return queued
     }
+
+    @SuppressLint("MissingPermission") private fun enableNotification(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic): Boolean =
+        enableAuthenticationNotification(gatt, characteristic)
 
     @SuppressLint("MissingPermission") private fun readDeviceInformation(gatt: BluetoothGatt) {
         pendingReads.clear()
@@ -318,6 +361,8 @@ class BandScanner(context: Context) {
         xiaomiAuthenticator = null
         pendingXiaomiAuth = null
         pendingClassicAuth = null
+        pendingMtuForAuth = false
+        pendingAuthNotificationEnabled = false
     }
 
     fun close() {
