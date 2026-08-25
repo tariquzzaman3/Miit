@@ -20,6 +20,7 @@ android {
 
     sourceSets["main"].apply {
         java.srcDirs(".")
+        java.exclude("build/**", ".gradle/**")
         manifest.srcFile("AndroidManifest.xml")
     }
 }
