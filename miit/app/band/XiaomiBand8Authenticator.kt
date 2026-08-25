@@ -13,7 +13,7 @@ import org.bouncycastle.crypto.modes.CCMBlockCipher
 import org.bouncycastle.crypto.params.AEADParameters
 import org.bouncycastle.crypto.params.KeyParameter
 
-/** Xiaomi Smart Band 8+ encrypted binding handshake, following Gadgetbridge's XiaomiAuthService flow. */
+/** Xiaomi Smart Band 8+ encrypted binding handshake, matching Gadgetbridge XiaomiAuthService. */
 class XiaomiBand8Authenticator(
     private val key: ByteArray,
     private val onEvent: (String) -> Unit,
@@ -27,10 +27,6 @@ class XiaomiBand8Authenticator(
         SecureRandom().nextBytes(phoneNonce)
         stage = 1
         onEvent("auth_started")
-
-        // Band 9's 0x4a02 characteristic reports READ + WRITE + NOTIFY (props=26).
-        // Use WRITE_TYPE_DEFAULT because WRITE (0x08), not WRITE_NO_RESPONSE (0x04),
-        // is advertised by this characteristic.
         characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         val packet = XiaomiProtoLite.commandNonce(phoneNonce)
         val accepted = write(gatt, characteristic, packet)
@@ -45,7 +41,7 @@ class XiaomiBand8Authenticator(
             onEvent("auth_notification_unparsed")
             return false
         }
-        onEvent("auth_response type=${command.type} subtype=${command.subtype} status=${command.status}")
+        onEvent("auth_response type=${command.type} subtype=${command.subtype} status=${command.status} authStatus=${command.authStatus}")
         if (command.type != 1) return false
 
         when (command.subtype) {
@@ -53,13 +49,9 @@ class XiaomiBand8Authenticator(
                 val watch = command.watchNonce ?: return fail("Band returned an invalid authentication nonce")
                 if (stage != 1 || watch.nonce.size != 16 || watch.hmac.size != 32) return false
 
-                // This is Gadgetbridge's computeAuthStep3Hmac():
-                // HMAC-SHA256(phoneNonce || watchNonce, secretKey), then
-                // expand with HMAC-SHA256 using the derived key and "miwear-auth".
                 val stepKey = authStep3Kdf(key, phoneNonce, watch.nonce)
                 val decryptionKey = stepKey.copyOfRange(0, 16)
                 val encryptionKey = stepKey.copyOfRange(16, 32)
-                val decryptionNonce = stepKey.copyOfRange(32, 36)
                 val encryptionNonce = stepKey.copyOfRange(36, 40)
 
                 val expectedWatchHmac = hmac(decryptionKey, watch.nonce + phoneNonce)
@@ -71,7 +63,7 @@ class XiaomiBand8Authenticator(
                 val info = XiaomiProtoLite.authDeviceInfo(
                     Build.VERSION.SDK_INT,
                     Build.MODEL,
-                    java.util.Locale.getDefault().language
+                    java.util.Locale.getDefault().getLanguage()
                 )
                 val encryptedInfo = ccmEncrypt(
                     encryptionKey,
@@ -90,11 +82,9 @@ class XiaomiBand8Authenticator(
             }
 
             27 -> {
-                // Gadgetbridge treats any CMD_AUTH response as authentication
-                // success and transitions the device to INITIALIZED.
                 if (stage == 2) {
                     stage = 3
-                    onEvent("auth_ok status=${command.status}")
+                    onEvent("auth_ok status=${command.status} authStatus=${command.authStatus}")
                     onResult(true, null)
                     return true
                 }
@@ -162,7 +152,7 @@ class XiaomiBand8Authenticator(
     }
 }
 
-/** Minimal protobuf2 codec matching the Xiaomi protobuf fields used by Gadgetbridge. */
+/** Minimal protobuf2 codec for the Xiaomi auth messages. */
 private object XiaomiProtoLite {
     data class Parsed(
         val type: Int,
@@ -183,10 +173,14 @@ private object XiaomiProtoLite {
     }
 
     fun authDeviceInfo(api: Int, model: String, language: String): ByteArray {
-        // Gadgetbridge's AuthDeviceInfo uses protobuf int32 for phoneApiLevel,
-        // not fixed32/float. This distinction is important for Band 8/9 auth.
+        // Gadgetbridge's proto2 schema defines phoneApiLevel as required float,
+        // so it must be encoded as protobuf fixed32 (wire type 5), not varint.
+        val apiFloat = ByteBuffer.allocate(4)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putFloat(api.toFloat())
+            .array()
         return fieldVarint(1, 0) +
-            fieldVarint(2, api) +
+            fieldFixed32(2, apiFloat) +
             fieldString(3, model) +
             fieldVarint(4, 224) +
             fieldString(5, language.take(2).uppercase())
@@ -219,6 +213,12 @@ private object XiaomiProtoLite {
                     val nested = parseAuth(b.bytes)
                     authStatus = nested.status
                     watch = nested.watch
+                }
+                100 -> {
+                    if (wire != 0) return null
+                    val v = readVarint(data, pos) ?: return null
+                    pos = v.next
+                    status = v.value
                 }
                 else -> pos = skipField(data, pos, wire) ?: return null
             }
@@ -285,6 +285,9 @@ private object XiaomiProtoLite {
 
     private fun fieldVarint(number: Int, value: Int): ByteArray =
         varint(number shl 3) + varint(value)
+
+    private fun fieldFixed32(number: Int, value: ByteArray): ByteArray =
+        varint((number shl 3) or 5) + value
 
     private fun varint(value: Int): ByteArray {
         var v = value
