@@ -13,7 +13,7 @@ import org.bouncycastle.crypto.modes.CCMBlockCipher
 import org.bouncycastle.crypto.params.AEADParameters
 import org.bouncycastle.crypto.params.KeyParameter
 
-/** Xiaomi Smart Band 8+ encrypted binding handshake. */
+/** Xiaomi Smart Band 8+ encrypted binding handshake, following Gadgetbridge's XiaomiAuthService flow. */
 class XiaomiBand8Authenticator(
     private val key: ByteArray,
     private val onEvent: (String) -> Unit,
@@ -27,11 +27,11 @@ class XiaomiBand8Authenticator(
         SecureRandom().nextBytes(phoneNonce)
         stage = 1
         onEvent("auth_started")
-        // Band 8/9 exposes 0x4a02 as READ + WRITE WITHOUT RESPONSE + NOTIFY.
-        // Android's default write type is WRITE_TYPE_DEFAULT, which does not
-        // match that characteristic and can silently prevent the first auth
-        // packet from ever reaching the band.
-        characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+
+        // Band 9's 0x4a02 characteristic reports READ + WRITE + NOTIFY (props=26).
+        // Use WRITE_TYPE_DEFAULT because WRITE (0x08), not WRITE_NO_RESPONSE (0x04),
+        // is advertised by this characteristic.
+        characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         val packet = XiaomiProtoLite.commandNonce(phoneNonce)
         val accepted = write(gatt, characteristic, packet)
         onEvent("auth_nonce_write_accepted=$accepted bytes=${packet.size}")
@@ -47,36 +47,58 @@ class XiaomiBand8Authenticator(
         }
         onEvent("auth_response type=${command.type} subtype=${command.subtype} status=${command.status}")
         if (command.type != 1) return false
+
         when (command.subtype) {
             26 -> {
                 val watch = command.watchNonce ?: return fail("Band returned an invalid authentication nonce")
                 if (stage != 1 || watch.nonce.size != 16 || watch.hmac.size != 32) return false
+
+                // This is Gadgetbridge's computeAuthStep3Hmac():
+                // HMAC-SHA256(phoneNonce || watchNonce, secretKey), then
+                // expand with HMAC-SHA256 using the derived key and "miwear-auth".
                 val stepKey = authStep3Kdf(key, phoneNonce, watch.nonce)
                 val decryptionKey = stepKey.copyOfRange(0, 16)
                 val encryptionKey = stepKey.copyOfRange(16, 32)
+                val decryptionNonce = stepKey.copyOfRange(32, 36)
                 val encryptionNonce = stepKey.copyOfRange(36, 40)
+
                 val expectedWatchHmac = hmac(decryptionKey, watch.nonce + phoneNonce)
-                if (!expectedWatchHmac.contentEquals(watch.hmac)) return fail("Band authentication key rejected")
+                if (!expectedWatchHmac.contentEquals(watch.hmac)) {
+                    return fail("Band authentication key rejected (watch HMAC mismatch)")
+                }
+
                 val encryptedNonces = hmac(encryptionKey, phoneNonce + watch.nonce)
-                val info = XiaomiProtoLite.authDeviceInfo(Build.VERSION.SDK_INT, Build.MODEL, java.util.Locale.getDefault().language)
-                val encryptedInfo = ccmEncrypt(encryptionKey, packetNonce(encryptionNonce, 0), info)
+                val info = XiaomiProtoLite.authDeviceInfo(
+                    Build.VERSION.SDK_INT,
+                    Build.MODEL,
+                    java.util.Locale.getDefault().language
+                )
+                val encryptedInfo = ccmEncrypt(
+                    encryptionKey,
+                    packetNonce(encryptionNonce, 0),
+                    info
+                )
+
                 stage = 2
                 onEvent("auth_challenge_verified")
-                characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
                 val packet = XiaomiProtoLite.commandAuth(encryptedNonces, encryptedInfo)
                 val accepted = write(gatt, characteristic, packet)
                 onEvent("auth_command_write_accepted=$accepted bytes=${packet.size}")
                 if (!accepted) return fail("Android rejected the Xiaomi auth command write")
                 return true
             }
+
             27 -> {
-                if (command.status == 1 || command.authStatus == 1) {
+                // Gadgetbridge treats any CMD_AUTH response as authentication
+                // success and transitions the device to INITIALIZED.
+                if (stage == 2) {
                     stage = 3
-                    onEvent("auth_ok")
+                    onEvent("auth_ok status=${command.status}")
                     onResult(true, null)
                     return true
                 }
-                return fail("Band rejected Xiaomi authentication (status=${command.status})")
+                return false
             }
         }
         return false
@@ -100,16 +122,18 @@ class XiaomiBand8Authenticator(
         return mac.doFinal(input)
     }
 
-    private fun authStep3Kdf(secret: ByteArray, phone: ByteArray, watch: ByteArray): ByteArray {
+    private fun authStep3Kdf(secretKey: ByteArray, phone: ByteArray, watch: ByteArray): ByteArray {
+        val initial = hmac(phone + watch, secretKey)
         val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(hmac(phone + watch, secret), "HmacSHA256"))
+        mac.init(SecretKeySpec(initial, "HmacSHA256"))
+        val label = "miwear-auth".toByteArray(Charsets.UTF_8)
         val output = ByteArray(64)
         var previous = ByteArray(0)
         var counter = 1
         var offset = 0
         while (offset < output.size) {
             mac.update(previous)
-            mac.update("miwear-auth".toByteArray(Charsets.UTF_8))
+            mac.update(label)
             mac.update(counter.toByte())
             previous = mac.doFinal()
             val copy = minOf(previous.size, output.size - offset)
@@ -121,7 +145,12 @@ class XiaomiBand8Authenticator(
     }
 
     private fun packetNonce(nonce4: ByteArray, sequence: Int): ByteArray =
-        ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).put(nonce4).putInt(0).putInt(sequence).array()
+        ByteBuffer.allocate(12)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .put(nonce4)
+            .putInt(0)
+            .putInt(sequence)
+            .array()
 
     private fun ccmEncrypt(key: ByteArray, nonce: ByteArray, payload: ByteArray): ByteArray {
         val cipher = CCMBlockCipher(AESEngine())
@@ -133,12 +162,20 @@ class XiaomiBand8Authenticator(
     }
 }
 
-/** Minimal protobuf2 codec for Xiaomi authentication messages. */
+/** Minimal protobuf2 codec matching the Xiaomi protobuf fields used by Gadgetbridge. */
 private object XiaomiProtoLite {
-    data class Parsed(val type: Int, val subtype: Int, val status: Int, val authStatus: Int, val watchNonce: WatchNonce?)
+    data class Parsed(
+        val type: Int,
+        val subtype: Int,
+        val status: Int,
+        val authStatus: Int,
+        val watchNonce: WatchNonce?
+    )
+
     data class WatchNonce(val nonce: ByteArray, val hmac: ByteArray)
 
-    fun commandNonce(nonce: ByteArray): ByteArray = command(26, fieldMessage(3, fieldMessage(30, fieldBytes(1, nonce))))
+    fun commandNonce(nonce: ByteArray): ByteArray =
+        command(26, fieldMessage(3, fieldMessage(30, fieldBytes(1, nonce))))
 
     fun commandAuth(encryptedNonces: ByteArray, encryptedInfo: ByteArray): ByteArray {
         val step3 = fieldBytes(1, encryptedNonces) + fieldBytes(2, encryptedInfo)
@@ -146,18 +183,43 @@ private object XiaomiProtoLite {
     }
 
     fun authDeviceInfo(api: Int, model: String, language: String): ByteArray {
-        val floatApi = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putFloat(api.toFloat()).array()
-        return fieldVarint(1, 0) + fieldFixed32(2, floatApi) + fieldString(3, model) + fieldVarint(4, 224) + fieldString(5, language.take(2).uppercase())
+        // Gadgetbridge's AuthDeviceInfo uses protobuf int32 for phoneApiLevel,
+        // not fixed32/float. This distinction is important for Band 8/9 auth.
+        return fieldVarint(1, 0) +
+            fieldVarint(2, api) +
+            fieldString(3, model) +
+            fieldVarint(4, 224) +
+            fieldString(5, language.take(2).uppercase())
     }
 
     fun parseCommand(data: ByteArray): Parsed? {
-        var pos = 0; var type = 0; var subtype = 0; var status = 0; var authStatus = 0; var watch: WatchNonce? = null
+        var pos = 0
+        var type = 0
+        var subtype = 0
+        var status = 0
+        var authStatus = 0
+        var watch: WatchNonce? = null
+
         while (pos < data.size) {
-            val tag = readVarint(data, pos) ?: return null; pos = tag.next
-            val field = tag.value ushr 3; val wire = tag.value and 7
+            val tag = readVarint(data, pos) ?: return null
+            pos = tag.next
+            val field = tag.value ushr 3
+            val wire = tag.value and 7
             when (field) {
-                1, 2, 100 -> { if (wire != 0) return null; val v = readVarint(data, pos) ?: return null; pos = v.next; when (field) { 1 -> type = v.value; 2 -> subtype = v.value; 100 -> status = v.value } }
-                3 -> { if (wire != 2) return null; val b = readBytes(data, pos) ?: return null; pos = b.next; val nested = parseAuth(b.bytes); authStatus = nested.status; watch = nested.watch }
+                1, 2 -> {
+                    if (wire != 0) return null
+                    val v = readVarint(data, pos) ?: return null
+                    pos = v.next
+                    if (field == 1) type = v.value else subtype = v.value
+                }
+                3 -> {
+                    if (wire != 2) return null
+                    val b = readBytes(data, pos) ?: return null
+                    pos = b.next
+                    val nested = parseAuth(b.bytes)
+                    authStatus = nested.status
+                    watch = nested.watch
+                }
                 else -> pos = skipField(data, pos, wire) ?: return null
             }
         }
@@ -165,40 +227,104 @@ private object XiaomiProtoLite {
     }
 
     private data class AuthParsed(val status: Int, val watch: WatchNonce?)
+
     private fun parseAuth(data: ByteArray): AuthParsed {
-        var pos = 0; var status = 0; var watch: WatchNonce? = null
+        var pos = 0
+        var status = 0
+        var watch: WatchNonce? = null
         while (pos < data.size) {
-            val tag = readVarint(data, pos) ?: break; pos = tag.next
-            val field = tag.value ushr 3; val wire = tag.value and 7
-            if (field == 8 && wire == 0) { val v = readVarint(data, pos) ?: break; pos = v.next; status = v.value }
-            else if (field == 31 && wire == 2) { val b = readBytes(data, pos) ?: break; pos = b.next; watch = parseWatchNonce(b.bytes) }
-            else { pos = skipField(data, pos, wire) ?: break }
+            val tag = readVarint(data, pos) ?: break
+            pos = tag.next
+            val field = tag.value ushr 3
+            val wire = tag.value and 7
+            if (field == 8 && wire == 0) {
+                val v = readVarint(data, pos) ?: break
+                pos = v.next
+                status = v.value
+            } else if (field == 31 && wire == 2) {
+                val b = readBytes(data, pos) ?: break
+                pos = b.next
+                watch = parseWatchNonce(b.bytes)
+            } else {
+                pos = skipField(data, pos, wire) ?: break
+            }
         }
         return AuthParsed(status, watch)
     }
 
     private fun parseWatchNonce(data: ByteArray): WatchNonce? {
-        var pos = 0; var nonce = ByteArray(0); var hmac = ByteArray(0)
+        var pos = 0
+        var nonce = ByteArray(0)
+        var hmac = ByteArray(0)
         while (pos < data.size) {
-            val tag = readVarint(data, pos) ?: return null; pos = tag.next
-            val field = tag.value ushr 3; val wire = tag.value and 7
-            if (wire != 2) { pos = skipField(data, pos, wire) ?: return null; continue }
-            val b = readBytes(data, pos) ?: return null; pos = b.next
+            val tag = readVarint(data, pos) ?: return null
+            pos = tag.next
+            val field = tag.value ushr 3
+            val wire = tag.value and 7
+            if (wire != 2) {
+                pos = skipField(data, pos, wire) ?: return null
+                continue
+            }
+            val b = readBytes(data, pos) ?: return null
+            pos = b.next
             if (field == 1) nonce = b.bytes else if (field == 2) hmac = b.bytes
         }
         return WatchNonce(nonce, hmac)
     }
 
-    private fun command(subtype: Int, auth: ByteArray): ByteArray = fieldVarint(1, 1) + fieldVarint(2, subtype) + auth
+    private fun command(subtype: Int, auth: ByteArray): ByteArray =
+        fieldVarint(1, 1) + fieldVarint(2, subtype) + auth
+
     private fun fieldMessage(number: Int, value: ByteArray): ByteArray = fieldBytes(number, value)
-    private fun fieldBytes(number: Int, value: ByteArray): ByteArray = varint((number shl 3) or 2) + varint(value.size) + value
-    private fun fieldString(number: Int, value: String): ByteArray = fieldBytes(number, value.toByteArray(Charsets.UTF_8))
-    private fun fieldVarint(number: Int, value: Int): ByteArray = varint(number shl 3) + varint(value)
-    private fun fieldFixed32(number: Int, value: ByteArray): ByteArray = varint((number shl 3) or 5) + value
-    private fun varint(value: Int): ByteArray { var v = value; val out = ArrayList<Byte>(); do { var b = v and 0x7f; v = v ushr 7; if (v != 0) b = b or 0x80; out.add(b.toByte()) } while (v != 0); return out.toByteArray() }
+
+    private fun fieldBytes(number: Int, value: ByteArray): ByteArray =
+        varint((number shl 3) or 2) + varint(value.size) + value
+
+    private fun fieldString(number: Int, value: String): ByteArray =
+        fieldBytes(number, value.toByteArray(Charsets.UTF_8))
+
+    private fun fieldVarint(number: Int, value: Int): ByteArray =
+        varint(number shl 3) + varint(value)
+
+    private fun varint(value: Int): ByteArray {
+        var v = value
+        val out = ArrayList<Byte>()
+        do {
+            var b = v and 0x7f
+            v = v ushr 7
+            if (v != 0) b = b or 0x80
+            out.add(b.toByte())
+        } while (v != 0)
+        return out.toByteArray()
+    }
+
     private data class Read(val value: Int, val next: Int)
     private data class Bytes(val bytes: ByteArray, val next: Int)
-    private fun readVarint(data: ByteArray, start: Int): Read? { var pos = start; var value = 0; var shift = 0; while (pos < data.size && shift < 32) { val b = data[pos++].toInt() and 0xff; value = value or ((b and 0x7f) shl shift); if ((b and 0x80) == 0) return Read(value, pos); shift += 7 }; return null }
-    private fun readBytes(data: ByteArray, start: Int): Bytes? { val l = readVarint(data, start) ?: return null; if (l.value < 0 || l.next + l.value > data.size) return null; return Bytes(data.copyOfRange(l.next, l.next + l.value), l.next + l.value) }
-    private fun skipField(data: ByteArray, start: Int, wire: Int): Int? = when (wire) { 0 -> readVarint(data, start)?.next; 1 -> if (start + 8 <= data.size) start + 8 else null; 2 -> readBytes(data, start)?.next; 5 -> if (start + 4 <= data.size) start + 4 else null; else -> null }
+
+    private fun readVarint(data: ByteArray, start: Int): Read? {
+        var pos = start
+        var value = 0
+        var shift = 0
+        while (pos < data.size && shift < 32) {
+            val b = data[pos++].toInt() and 0xff
+            value = value or ((b and 0x7f) shl shift)
+            if ((b and 0x80) == 0) return Read(value, pos)
+            shift += 7
+        }
+        return null
+    }
+
+    private fun readBytes(data: ByteArray, start: Int): Bytes? {
+        val l = readVarint(data, start) ?: return null
+        if (l.value < 0 || l.next + l.value > data.size) return null
+        return Bytes(data.copyOfRange(l.next, l.next + l.value), l.next + l.value)
+    }
+
+    private fun skipField(data: ByteArray, start: Int, wire: Int): Int? = when (wire) {
+        0 -> readVarint(data, start)?.next
+        1 -> if (start + 8 <= data.size) start + 8 else null
+        2 -> readBytes(data, start)?.next
+        5 -> if (start + 4 <= data.size) start + 4 else null
+        else -> null
+    }
 }
