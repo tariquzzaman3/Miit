@@ -21,10 +21,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
+    kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
 }
 
@@ -41,5 +38,6 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.8.6")
     implementation("androidx.datastore:datastore-preferences:1.1.2")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
