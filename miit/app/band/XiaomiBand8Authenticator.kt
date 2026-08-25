@@ -13,7 +13,10 @@ import org.bouncycastle.crypto.modes.CCMBlockCipher
 import org.bouncycastle.crypto.params.AEADParameters
 import org.bouncycastle.crypto.params.KeyParameter
 
-/** Xiaomi Smart Band 8+ encrypted binding handshake, matching Gadgetbridge XiaomiAuthService. */
+/**
+ * Xiaomi Smart Band 8+/9 encrypted authentication transport.
+ * The Xiaomi channel uses Gadgetbridge-style chunk framing around the protobuf payload.
+ */
 class XiaomiBand8Authenticator(
     private val key: ByteArray,
     private val onEvent: (String) -> Unit,
@@ -21,23 +24,73 @@ class XiaomiBand8Authenticator(
 ) {
     private val phoneNonce = ByteArray(16)
     private var stage = 0
+    private var pendingPayload: ByteArray? = null
+    private var pendingSequence: String = "nonce"
 
     fun start(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic): Boolean {
         if (key.size != 16) return fail("Auth key must be 32 hexadecimal characters")
         SecureRandom().nextBytes(phoneNonce)
         stage = 1
+        pendingSequence = "nonce"
+        pendingPayload = XiaomiProtoLite.commandNonce(phoneNonce)
         onEvent("auth_started")
-        characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-        val packet = XiaomiProtoLite.commandNonce(phoneNonce)
-        val accepted = write(gatt, characteristic, packet)
-        onEvent("auth_nonce_write_accepted=$accepted bytes=${packet.size}")
-        if (!accepted) return fail("Android rejected the Xiaomi auth nonce write")
+        onEvent("auth_transport=chunked_single_plaintext")
+        val accepted = sendChunkStart(gatt, characteristic)
+        onEvent("auth_chunk_start_accepted=$accepted bytes=${pendingPayload!!.size}")
+        if (!accepted) return fail("Android rejected the Xiaomi auth transport frame")
         return true
     }
 
     fun onNotification(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray): Boolean {
-        onEvent("auth_notification bytes=${value.size}")
-        val command = XiaomiProtoLite.parseCommand(value) ?: run {
+        if (value.size < 3) return false
+        onEvent("auth_notification bytes=${value.size} uuid=${characteristic.uuid}")
+
+        if (value.size >= 4 && value[0].toInt() == 0 && value[1].toInt() == 0) {
+            val type = value[2].toInt() and 0xff
+            when (type) {
+                1 -> {
+                    val subtype = value[3].toInt() and 0xff
+                    if (subtype == 1) {
+                        onEvent("auth_chunk_start_ack")
+                        val payload = pendingPayload ?: return false
+                        val accepted = sendChunk(gatt, characteristic, payload)
+                        onEvent("auth_chunk_sent_accepted=$accepted bytes=${payload.size} seq=$pendingSequence")
+                        if (!accepted) return fail("Android rejected the Xiaomi auth chunk")
+                        pendingPayload = null
+                        return true
+                    }
+                    if (subtype == 2) return fail("Band rejected the Xiaomi auth chunk")
+                }
+                2 -> {
+                    val encryption = value[3].toInt() and 0xff
+                    val payloadStart = when (encryption) {
+                        1 -> if (value.size >= 6) 6 else return false
+                        2 -> 4
+                        else -> return false
+                    }
+                    if (payloadStart >= value.size) return false
+                    val payload = value.copyOfRange(payloadStart, value.size)
+                    // Gadgetbridge acknowledges single commands with 00 00 03 00.
+                    write(gatt, characteristic, byteArrayOf(0x00, 0x00, 0x03, 0x00))
+                    return handleProtoPayload(gatt, characteristic, payload)
+                }
+                3 -> {
+                    val result = value[3].toInt() and 0xff
+                    onEvent("auth_transport_ack=$result")
+                    return result == 0
+                }
+            }
+        }
+
+        return handleProtoPayload(gatt, characteristic, value)
+    }
+
+    private fun handleProtoPayload(
+        gatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+        payload: ByteArray
+    ): Boolean {
+        val command = XiaomiProtoLite.parseCommand(payload) ?: run {
             onEvent("auth_notification_unparsed")
             return false
         }
@@ -72,15 +125,14 @@ class XiaomiBand8Authenticator(
                 )
 
                 stage = 2
+                pendingSequence = "auth"
+                pendingPayload = XiaomiProtoLite.commandAuth(encryptedNonces, encryptedInfo)
                 onEvent("auth_challenge_verified")
-                characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-                val packet = XiaomiProtoLite.commandAuth(encryptedNonces, encryptedInfo)
-                val accepted = write(gatt, characteristic, packet)
-                onEvent("auth_command_write_accepted=$accepted bytes=${packet.size}")
-                if (!accepted) return fail("Android rejected the Xiaomi auth command write")
+                val accepted = sendChunkStart(gatt, characteristic)
+                onEvent("auth_command_chunk_start_accepted=$accepted bytes=${pendingPayload!!.size}")
+                if (!accepted) return fail("Android rejected the Xiaomi auth transport frame")
                 return true
             }
-
             27 -> {
                 if (stage == 2) {
                     stage = 3
@@ -96,9 +148,40 @@ class XiaomiBand8Authenticator(
 
     private fun fail(message: String): Boolean {
         stage = -1
+        pendingPayload = null
         onEvent("auth_failed: $message")
         onResult(false, message)
         return false
+    }
+
+    private fun configureWriteType(characteristic: BluetoothGattCharacteristic) {
+        characteristic.writeType = if ((characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE) != 0) {
+            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        } else {
+            BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+        }
+    }
+
+    private fun sendChunkStart(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic): Boolean {
+        configureWriteType(characteristic)
+        val frame = ByteBuffer.allocate(6)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putShort(0)
+            .put(0)
+            .put(0)
+            .putShort(1)
+            .array()
+        return write(gatt, characteristic, frame)
+    }
+
+    private fun sendChunk(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, payload: ByteArray): Boolean {
+        configureWriteType(characteristic)
+        val frame = ByteBuffer.allocate(2 + payload.size)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putShort(1)
+            .put(payload)
+            .array()
+        return write(gatt, characteristic, frame)
     }
 
     private fun write(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, data: ByteArray): Boolean {
@@ -152,7 +235,7 @@ class XiaomiBand8Authenticator(
     }
 }
 
-/** Minimal protobuf2 codec for the Xiaomi auth messages. */
+/** Minimal protobuf2 codec for Xiaomi auth messages. */
 private object XiaomiProtoLite {
     data class Parsed(
         val type: Int,
@@ -173,8 +256,6 @@ private object XiaomiProtoLite {
     }
 
     fun authDeviceInfo(api: Int, model: String, language: String): ByteArray {
-        // Gadgetbridge's proto2 schema defines phoneApiLevel as required float,
-        // so it must be encoded as protobuf fixed32 (wire type 5), not varint.
         val apiFloat = ByteBuffer.allocate(4)
             .order(ByteOrder.LITTLE_ENDIAN)
             .putFloat(api.toFloat())
@@ -193,7 +274,6 @@ private object XiaomiProtoLite {
         var status = 0
         var authStatus = 0
         var watch: WatchNonce? = null
-
         while (pos < data.size) {
             val tag = readVarint(data, pos) ?: return null
             pos = tag.next
