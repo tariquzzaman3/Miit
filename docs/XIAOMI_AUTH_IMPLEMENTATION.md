@@ -1,1 +1,0 @@
-Miit Band 8+ binding uses the Xiaomi encrypted application-layer handshake after Android Bluetooth bonding. Gadgetbridge requires a valid 16-byte (32 hex character) auth key and then performs the nonce/HMAC authentication flow before the device is initialized. Miit must never log or commit the raw auth key. Reference: Gadgetbridge XiaomiAuthService and xiaomi.proto.

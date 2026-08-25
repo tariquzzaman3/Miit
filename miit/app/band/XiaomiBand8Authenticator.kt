@@ -27,11 +27,25 @@ class XiaomiBand8Authenticator(
         SecureRandom().nextBytes(phoneNonce)
         stage = 1
         onEvent("auth_started")
-        return write(gatt, characteristic, XiaomiProtoLite.commandNonce(phoneNonce))
+        // Band 8/9 exposes 0x4a02 as READ + WRITE WITHOUT RESPONSE + NOTIFY.
+        // Android's default write type is WRITE_TYPE_DEFAULT, which does not
+        // match that characteristic and can silently prevent the first auth
+        // packet from ever reaching the band.
+        characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+        val packet = XiaomiProtoLite.commandNonce(phoneNonce)
+        val accepted = write(gatt, characteristic, packet)
+        onEvent("auth_nonce_write_accepted=$accepted bytes=${packet.size}")
+        if (!accepted) return fail("Android rejected the Xiaomi auth nonce write")
+        return true
     }
 
     fun onNotification(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray): Boolean {
-        val command = XiaomiProtoLite.parseCommand(value) ?: return false
+        onEvent("auth_notification bytes=${value.size}")
+        val command = XiaomiProtoLite.parseCommand(value) ?: run {
+            onEvent("auth_notification_unparsed")
+            return false
+        }
+        onEvent("auth_response type=${command.type} subtype=${command.subtype} status=${command.status}")
         if (command.type != 1) return false
         when (command.subtype) {
             26 -> {
@@ -48,7 +62,12 @@ class XiaomiBand8Authenticator(
                 val encryptedInfo = ccmEncrypt(encryptionKey, packetNonce(encryptionNonce, 0), info)
                 stage = 2
                 onEvent("auth_challenge_verified")
-                return write(gatt, characteristic, XiaomiProtoLite.commandAuth(encryptedNonces, encryptedInfo))
+                characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                val packet = XiaomiProtoLite.commandAuth(encryptedNonces, encryptedInfo)
+                val accepted = write(gatt, characteristic, packet)
+                onEvent("auth_command_write_accepted=$accepted bytes=${packet.size}")
+                if (!accepted) return fail("Android rejected the Xiaomi auth command write")
+                return true
             }
             27 -> {
                 if (command.status == 1 || command.authStatus == 1) {
