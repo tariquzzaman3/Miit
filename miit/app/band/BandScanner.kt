@@ -37,6 +37,10 @@ class BandScanner(context: Context) {
     private var xiaomiAuthenticator: XiaomiBand8Authenticator? = null
     private var pendingBondDevice: BandDevice? = null
     private var pendingAuthKey: ByteArray? = null
+    private var activeAddress: String? = null
+    private var notificationPending = false
+    private var pendingXiaomiAuth: Pair<BluetoothGatt, BluetoothGattCharacteristic>? = null
+    private var pendingClassicAuth: Pair<BluetoothGatt, BluetoothGattCharacteristic>? = null
 
     private val bondReceiver = object : BroadcastReceiver() {
         @SuppressLint("MissingPermission") override fun onReceive(context: Context, intent: Intent) {
@@ -76,13 +80,20 @@ class BandScanner(context: Context) {
     @SuppressLint("MissingPermission") fun connect(device: BandDevice) = connect(device, null)
 
     @SuppressLint("MissingPermission") fun connect(device: BandDevice, authKey: ByteArray?) {
-        stopScan(); val remote = adapter?.getRemoteDevice(device.address) ?: run { _state.value = BandConnectionState.Error; return }
-        gatt?.close(); gatt = null; pendingAuthKey = authKey
+        if (activeAddress != null || pendingBondDevice != null || _state.value == BandConnectionState.Connecting || _state.value == BandConnectionState.Authenticating) {
+            MiitTestLog.add("Connect ignored: connection/authentication already in progress")
+            return
+        }
+        stopScan()
+        val remote = adapter?.getRemoteDevice(device.address) ?: run { _state.value = BandConnectionState.Error; return }
+        closeGattOnly()
+        pendingAuthKey = authKey
+        activeAddress = device.address
         MiitTestLog.add("Connect requested: ${device.name} ${device.address}; bond=${bondStateName(remote.bondState)}; authKey=${if (authKey != null) "present" else "missing"}")
         if (remote.bondState != BluetoothDevice.BOND_BONDED) {
             pendingBondDevice = device; _state.value = BandConnectionState.Connecting; MiitTestLog.add("Waiting for Android Bluetooth bond before opening GATT")
             val started = runCatching { remote.createBond() }.getOrDefault(false); MiitTestLog.add("createBond() returned: $started")
-            if (!started) { pendingBondDevice = null; pendingAuthKey = null; _state.value = BandConnectionState.Error }; return
+            if (!started) { pendingBondDevice = null; pendingAuthKey = null; activeAddress = null; _state.value = BandConnectionState.Error }; return
         }
         pendingAuthKey = null; openGatt(device, authKey)
     }
@@ -90,7 +101,7 @@ class BandScanner(context: Context) {
     private fun bondStateName(state: Int): String = when (state) { BluetoothDevice.BOND_NONE -> "NONE"; BluetoothDevice.BOND_BONDING -> "BONDING"; BluetoothDevice.BOND_BONDED -> "BONDED"; else -> "UNKNOWN" }
 
     @SuppressLint("MissingPermission") private fun openGatt(device: BandDevice, authKey: ByteArray? = null) {
-        val remote = adapter?.getRemoteDevice(device.address) ?: run { _state.value = BandConnectionState.Error; return }
+        val remote = adapter?.getRemoteDevice(device.address) ?: run { activeAddress = null; _state.value = BandConnectionState.Error; return }
         _state.value = BandConnectionState.Connecting; MiitTestLog.add("Opening GATT connection to ${device.address} after bond is ready")
         gatt = remote.connectGatt(appContext, false, callback(authKey), BluetoothDevice.TRANSPORT_LE)
     }
@@ -98,8 +109,11 @@ class BandScanner(context: Context) {
     private fun callback(authKey: ByteArray?) = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             MiitTestLog.add("GATT state: status=$status newState=$newState")
-            if (status != BluetoothGatt.GATT_SUCCESS) { _state.value = BandConnectionState.Error; g.close(); return }
-            when (newState) { BluetoothProfile.STATE_CONNECTED -> { _state.value = BandConnectionState.Connected; MiitTestLog.add("GATT connected; discovering services"); g.discoverServices() }; BluetoothProfile.STATE_DISCONNECTED -> _state.value = BandConnectionState.Disconnected }
+            if (status != BluetoothGatt.GATT_SUCCESS) { _state.value = BandConnectionState.Error; if (g === gatt) { g.close(); gatt = null; activeAddress = null }; return }
+            when (newState) {
+                BluetoothProfile.STATE_CONNECTED -> { _state.value = BandConnectionState.Connected; MiitTestLog.add("GATT connected; discovering services"); g.discoverServices() }
+                BluetoothProfile.STATE_DISCONNECTED -> { _state.value = BandConnectionState.Disconnected; if (g === gatt) { g.close(); gatt = null; activeAddress = null; authenticator = null; xiaomiAuthenticator = null; notificationPending = false } }
+            }
         }
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
@@ -111,15 +125,38 @@ class BandScanner(context: Context) {
             val classicAuth = MiBandProtocol.findAuthenticationCharacteristic(g)
             if (xiaomiAuth != null) {
                 if (authKey == null || authKey.size != 16) { _state.value = BandConnectionState.AwaitingXiaomiBinding; MiitTestLog.add("Band 8+ auth service found, but no valid auth key is configured"); return }
-                enableNotification(g, xiaomiAuth); _state.value = BandConnectionState.Authenticating
-                xiaomiAuthenticator = XiaomiBand8Authenticator(authKey, { e -> MiitTestLog.add("Xiaomi auth: $e") }) { ok, error -> _state.value = if (ok) BandConnectionState.Authenticated else BandConnectionState.Error; MiitTestLog.add(if (ok) "Xiaomi auth: initialized" else "Xiaomi auth failed: ${error ?: "unknown error"}") }
-                xiaomiAuthenticator?.start(g, xiaomiAuth); return
+                pendingXiaomiAuth = g to xiaomiAuth
+                notificationPending = enableNotification(g, xiaomiAuth)
+                if (!notificationPending) { _state.value = BandConnectionState.Error; MiitTestLog.add("Unable to enable Xiaomi authentication notifications"); return }
+                _state.value = BandConnectionState.Authenticating
+                return
             }
             if (classicAuth != null && authKey != null && authKey.size == 16) {
-                enableNotification(g, classicAuth); _state.value = BandConnectionState.Authenticating
-                authenticator = MiBandAuthenticator(authKey) { ok, _ -> _state.value = if (ok) BandConnectionState.Authenticated else BandConnectionState.Error }; authenticator?.begin(g, classicAuth)
+                pendingClassicAuth = g to classicAuth
+                notificationPending = enableNotification(g, classicAuth)
+                if (!notificationPending) { _state.value = BandConnectionState.Error; return }
+                _state.value = BandConnectionState.Authenticating
             } else if (MiBandProtocol.hasClassicMiBandServices(g)) { MiitTestLog.add("Classic FEE0/FEE1 protocol detected; no auth key supplied"); _state.value = BandConnectionState.Connected }
             else { _state.value = BandConnectionState.AwaitingXiaomiBinding; MiitTestLog.add("Xiaomi Band 8+ services detected: Android bond complete, Xiaomi app-layer binding/auth still required") }
+        }
+
+        override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+            if (descriptor.uuid != CLIENT_CONFIG_DESCRIPTOR) return
+            notificationPending = false
+            if (status != BluetoothGatt.GATT_SUCCESS) { MiitTestLog.add("Notification descriptor write failed: status=$status"); _state.value = BandConnectionState.Error; return }
+            MiitTestLog.add("Authentication notifications enabled")
+            pendingXiaomiAuth?.takeIf { it.first === g }?.let { (gg, c) ->
+                pendingXiaomiAuth = null
+                val key = pendingAuthKey ?: return@let
+                xiaomiAuthenticator = XiaomiBand8Authenticator(key, { e -> MiitTestLog.add("Xiaomi auth: $e") }) { ok, error -> _state.value = if (ok) BandConnectionState.Authenticated else BandConnectionState.Error; MiitTestLog.add(if (ok) "Xiaomi auth: initialized" else "Xiaomi auth failed: ${error ?: "unknown error"}") }
+                xiaomiAuthenticator?.start(gg, c)
+            }
+            pendingClassicAuth?.takeIf { it.first === g }?.let { (gg, c) ->
+                pendingClassicAuth = null
+                val key = pendingAuthKey ?: return@let
+                authenticator = MiBandAuthenticator(key) { ok, _ -> _state.value = if (ok) BandConnectionState.Authenticated else BandConnectionState.Error }
+                authenticator?.begin(gg, c)
+            }
         }
 
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
@@ -129,15 +166,18 @@ class BandScanner(context: Context) {
         override fun onCharacteristicRead(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) { if (status == BluetoothGatt.GATT_SUCCESS) updateDeviceInfo(characteristic.uuid, characteristic.value?.toString(Charsets.UTF_8)?.trim().orEmpty()); readNextDeviceInfo(g) }
     }
 
-    @SuppressLint("MissingPermission") private fun enableNotification(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-        gatt.setCharacteristicNotification(characteristic, true); val descriptor = characteristic.getDescriptor(CLIENT_CONFIG_DESCRIPTOR) ?: return
-        @Suppress("DEPRECATION") descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE; @Suppress("DEPRECATION") gatt.writeDescriptor(descriptor)
+    @SuppressLint("MissingPermission") private fun enableNotification(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic): Boolean {
+        if (!gatt.setCharacteristicNotification(characteristic, true)) return false
+        val descriptor = characteristic.getDescriptor(CLIENT_CONFIG_DESCRIPTOR) ?: return false
+        @Suppress("DEPRECATION") descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        @Suppress("DEPRECATION") return gatt.writeDescriptor(descriptor)
     }
     @SuppressLint("MissingPermission") private fun readDeviceInformation(gatt: BluetoothGatt) { pendingReads.clear(); val service = gatt.getService(DEVICE_INFORMATION_SERVICE) ?: return; listOf(MODEL_NUMBER_UUID, FIRMWARE_UUID, MANUFACTURER_UUID).forEach { service.getCharacteristic(it)?.let(pendingReads::add) }; readNextDeviceInfo(gatt) }
     private val pendingReads = ArrayDeque<BluetoothGattCharacteristic>()
     @SuppressLint("MissingPermission") private fun readNextDeviceInfo(gatt: BluetoothGatt) { pendingReads.removeFirstOrNull()?.let(gatt::readCharacteristic) }
     private fun updateDeviceInfo(uuid: UUID, value: String) { val address = gatt?.device?.address ?: return; val current = _devices.value.firstOrNull { it.address == address } ?: return; val updated = when (uuid) { MODEL_NUMBER_UUID -> current.copy(model = value); FIRMWARE_UUID -> current.copy(firmware = value); MANUFACTURER_UUID -> current.copy(manufacturer = value); else -> current }; _devices.value = _devices.value.map { if (it.address == address) updated else it }; if (value.isNotBlank()) MiitTestLog.add("Device info ${uuid}: ${value.take(120)}") }
-    fun close() { stopScan(); pendingBondDevice = null; pendingAuthKey = null; gatt?.close(); gatt = null; authenticator = null; xiaomiAuthenticator = null; runCatching { appContext.unregisterReceiver(bondReceiver) }; _state.value = BandConnectionState.Idle }
+    private fun closeGattOnly() { gatt?.close(); gatt = null; authenticator = null; xiaomiAuthenticator = null; notificationPending = false; pendingXiaomiAuth = null; pendingClassicAuth = null }
+    fun close() { stopScan(); pendingBondDevice = null; pendingAuthKey = null; activeAddress = null; closeGattOnly(); runCatching { appContext.unregisterReceiver(bondReceiver) }; _state.value = BandConnectionState.Idle }
     private fun isLikelyMiBand(name: String): Boolean { val n = name.lowercase(); return n.contains("mi band") || n.contains("mi smart band") || n.contains("xiaomi band") || n.contains("smart band") }
 
     companion object {
