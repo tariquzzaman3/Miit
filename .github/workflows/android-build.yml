@@ -11,13 +11,12 @@ permissions:
 env:
   GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx2048m
 
-defaults:
-  run:
-    working-directory: miit
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: miit
     steps:
       - name: Checkout
         uses: actions/checkout@v4
