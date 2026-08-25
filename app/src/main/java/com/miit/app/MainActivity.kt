@@ -27,16 +27,19 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.miit.app.band.AuthKeyParser
 import com.miit.app.band.BandConnectionState
 import com.miit.app.band.BandDevice
 import com.miit.app.band.BandScanner
@@ -46,7 +49,6 @@ class MainActivity : ComponentActivity() {
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         MiitTestLog.add("Permissions result: ${result.entries.joinToString { "${it.key}=${it.value}" }}")
     }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         MiitTestLog.add("App started")
@@ -59,14 +61,10 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MiitApp() {
-    val nav = rememberNavController()
-    var selected by remember { mutableIntStateOf(0) }
+    val nav = rememberNavController(); var selected by remember { mutableIntStateOf(0) }
     val routes = listOf("home", "editor", "settings")
     MaterialTheme {
-        Scaffold(
-            topBar = { TopAppBar(title = { Text("Miit") }) },
-            bottomBar = { NavigationBar { listOf("Band", "Editor", "Settings").forEachIndexed { index, label -> NavigationBarItem(selected = selected == index, onClick = { selected = index; nav.navigate(routes[index]) }, icon = { Text(listOf("⌚", "✎", "⚙")[index]) }, label = { Text(label) }) } } }
-        ) { padding ->
+        Scaffold(topBar = { TopAppBar(title = { Text("Miit") }) }, bottomBar = { NavigationBar { listOf("Band", "Editor", "Settings").forEachIndexed { index, label -> NavigationBarItem(selected = selected == index, onClick = { selected = index; nav.navigate(routes[index]) }, icon = { Text(listOf("⌚", "✎", "⚙")[index]) }, label = { Text(label) }) } } }) { padding ->
             NavHost(navController = nav, startDestination = "home", modifier = Modifier.padding(padding)) {
                 composable("home") { HomeScreen(onEditor = { selected = 1; nav.navigate("editor") }) }
                 composable("editor") { EditorScreen() }
@@ -82,31 +80,36 @@ private fun HomeScreen(onEditor: () -> Unit) {
     val scanner = remember { BandScanner(context) }
     val devices by scanner.devices.collectAsState()
     val state by scanner.state.collectAsState()
+    val prefs = remember { context.getSharedPreferences("miit_pairing", Context.MODE_PRIVATE) }
+    var authKeyText by remember { mutableStateOf(prefs.getString("auth_key", "") ?: "") }
     val saved = remember { mutableStateListOf("My first watchface", "Minimal digital") }
     DisposableEffect(Unit) { onDispose { scanner.close() } }
 
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Mi Band connection", style = MaterialTheme.typography.titleLarge)
-                    Spacer(Modifier.height(6.dp))
                     Text(connectionMessage(state))
-                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(value = authKeyText, onValueChange = { authKeyText = it; prefs.edit().putString("auth_key", it.trim()).apply() }, modifier = Modifier.fillMaxWidth(), label = { Text("Xiaomi pairing / auth key") }, supportingText = { Text("32 hexadecimal characters. Keep this key private; Miit stores it only on this device.") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { MiitTestLog.add("User tapped Scan for band"); scanner.startScan() }) { Text(if (state == BandConnectionState.Scanning) "Scanning…" else "Scan for band") }
                         if (state == BandConnectionState.Scanning) Button(onClick = { MiitTestLog.add("User tapped Stop scan"); scanner.stopScan() }) { Text("Stop") }
                     }
-                    Spacer(Modifier.height(12.dp))
                     Button(onClick = { val log = MiitTestLog.text(context); val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager; clipboard.setPrimaryClip(ClipData.newPlainText("Miit testing logs", log)); Toast.makeText(context, "Testing log copied. Paste it into ChatGPT.", Toast.LENGTH_LONG).show() }, modifier = Modifier.fillMaxWidth()) { Text("📋 Copy testing logs") }
-                    Spacer(Modifier.height(6.dp))
                     Button(onClick = { MiitTestLog.clear(); Toast.makeText(context, "Testing log cleared", Toast.LENGTH_SHORT).show() }, modifier = Modifier.fillMaxWidth()) { Text("Clear testing logs") }
                 }
             }
         }
         if (devices.isNotEmpty()) {
             item { Text("Detected bands", style = MaterialTheme.typography.titleLarge) }
-            items(devices, key = { it.address }) { device -> BandDeviceCard(device = device, onConnect = { MiitTestLog.add("User tapped Connect: ${device.name} (${device.address})"); scanner.connect(device) }) }
+            items(devices, key = { it.address }) { device ->
+                BandDeviceCard(device) {
+                    val key = AuthKeyParser.parse(authKeyText)
+                    if (key == null) Toast.makeText(context, "Enter a valid 32-character hexadecimal auth key first.", Toast.LENGTH_LONG).show()
+                    else { MiitTestLog.add("User tapped Connect: ${device.name} (${device.address})"); scanner.connect(device, key) }
+                }
+            }
         }
         item { Text("My displays", style = MaterialTheme.typography.titleLarge) }
         items(saved) { name -> Card(Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(name); Button(onClick = onEditor) { Text("Edit") } } } }
@@ -116,18 +119,11 @@ private fun HomeScreen(onEditor: () -> Unit) {
 
 @Composable
 private fun BandDeviceCard(device: BandDevice, onConnect: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(device.name, style = MaterialTheme.typography.titleMedium)
-            Text("Signal: ${device.rssi} dBm")
-            Text("Address: ${device.address}")
-            device.model?.let { Text("Model: $it") }
-            device.firmware?.let { Text("Firmware: $it") }
-            device.manufacturer?.let { Text("Manufacturer: $it") }
-            Spacer(Modifier.height(6.dp))
-            Button(onClick = onConnect) { Text("Connect") }
-        }
-    }
+    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(device.name, style = MaterialTheme.typography.titleMedium); Text("Signal: ${device.rssi} dBm"); Text("Address: ${device.address}")
+        device.model?.let { Text("Model: $it") }; device.firmware?.let { Text("Firmware: $it") }; device.manufacturer?.let { Text("Manufacturer: $it") }
+        Spacer(Modifier.height(6.dp)); Button(onClick = onConnect) { Text("Connect") }
+    } }
 }
 
 private fun connectionMessage(state: BandConnectionState): String = when (state) {
@@ -135,24 +131,21 @@ private fun connectionMessage(state: BandConnectionState): String = when (state)
     BandConnectionState.Scanning -> "Scanning… keep the band nearby and awake."
     BandConnectionState.Connecting -> "Connecting / completing Android pairing…"
     BandConnectionState.Connected -> "Android Bluetooth connection is active."
-    BandConnectionState.AwaitingXiaomiBinding -> "Android pairing is complete. Xiaomi binding/authentication is the next step."
+    BandConnectionState.AwaitingXiaomiBinding -> "Android pairing is complete. Enter the Xiaomi auth key to continue binding."
     BandConnectionState.Authenticating -> "Authenticating with the band…"
     BandConnectionState.Authenticated -> "Authenticated and ready."
     BandConnectionState.Disconnected -> "Band disconnected."
-    BandConnectionState.Error -> "Bluetooth operation failed. Check Bluetooth and permissions, then try again."
+    BandConnectionState.Error -> "Bluetooth/authentication failed. Check the key and try again."
 }
 
 @Composable
 private fun EditorScreen() {
     var tool by remember { mutableStateOf("Select") }
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Watchface editor", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(12.dp))
+        Text("Watchface editor", style = MaterialTheme.typography.headlineSmall); Spacer(Modifier.height(12.dp))
         Card(Modifier.fillMaxWidth().weight(1f)) { Column(Modifier.fillMaxSize().padding(16.dp)) { Text("Canvas preview", style = MaterialTheme.typography.titleMedium); Spacer(Modifier.height(12.dp)); Column(Modifier.fillMaxWidth().weight(1f).padding(24.dp)) { Text("12:45", style = MaterialTheme.typography.displayLarge); Text("Tuesday  •  25 Aug"); Spacer(Modifier.height(20.dp)); Text("♥ 72   •   6,421 steps") } } }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("Select", "Text", "Image", "Shape", "AI", "Font").forEach { t -> FilterChip(selected = tool == t, onClick = { tool = t }, label = { Text(t) }) } }
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = {}) { Text("Save") }; Button(onClick = {}) { Text("Send to band") } }
+        Spacer(Modifier.height(12.dp)); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("Select", "Text", "Image", "Shape", "AI", "Font").forEach { t -> FilterChip(selected = tool == t, onClick = { tool = t }, label = { Text(t) }) } }
+        Spacer(Modifier.height(8.dp)); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = {}) { Text("Save") }; Button(onClick = {}) { Text("Send to band") } }
     }
 }
 
