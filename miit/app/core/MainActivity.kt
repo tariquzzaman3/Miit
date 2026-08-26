@@ -21,13 +21,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -37,17 +39,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
 import com.miit.app.band.AuthKeyParser
 import com.miit.app.band.BandConnectionState
 import com.miit.app.band.BandDevice
 import com.miit.app.band.BandScanner
 import com.miit.app.band.MiitTestLog
 
+private enum class MiitScreen { CONNECTION, BAND, EDITOR }
+
 class MainActivity : ComponentActivity() {
-    private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+    private val permissions = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
         MiitTestLog.add("Permissions result: ${result.entries.joinToString { "${it.key}=${it.value}" }}")
     }
 
@@ -70,215 +73,366 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MiitApp() {
-    val nav = rememberNavController()
-    var selected by remember { mutableIntStateOf(0) }
-    val routes = listOf("home", "editor", "settings")
-    MaterialTheme {
-        Scaffold(
-            topBar = { TopAppBar(title = { Text("Miit") }) },
-            bottomBar = {
-                NavigationBar {
-                    listOf("Band", "Editor", "Settings").forEachIndexed { index, label ->
-                        NavigationBarItem(
-                            selected = selected == index,
-                            onClick = { selected = index; nav.navigate(routes[index]) },
-                            icon = { Text(listOf("⌚", "✎", "⚙")[index]) },
-                            label = { Text(label) }
-                        )
-                    }
-                }
-            }
-        ) { padding ->
-            NavHost(navController = nav, startDestination = "home", modifier = Modifier.padding(padding)) {
-                composable("home") { HomeScreen(onEditor = { selected = 1; nav.navigate("editor") }) }
-                composable("editor") { EditorScreen() }
-                composable("settings") { SettingsScreen() }
-            }
-        }
-    }
-}
-
-@Composable
-private fun HomeScreen(onEditor: () -> Unit) {
+private fun MiitApp() {
     val context = LocalContext.current
     val scanner = remember { BandScanner(context) }
     val devices by scanner.devices.collectAsState()
-    val state by scanner.state.collectAsState()
+    val connectionState by scanner.state.collectAsState()
     val prefs = remember { context.getSharedPreferences("miit_pairing", Context.MODE_PRIVATE) }
     var authKeyText by remember { mutableStateOf(prefs.getString("auth_key", "") ?: "") }
-    val saved = remember { mutableStateListOf("My first watchface", "Minimal digital") }
-    DisposableEffect(Unit) { onDispose { scanner.close() } }
+    var screen by remember { mutableStateOf(MiitScreen.CONNECTION) }
+    var showSettings by remember { mutableStateOf(false) }
+    var editingDisplay by remember { mutableStateOf<String?>(null) }
 
-    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Mi Band connection", style = MaterialTheme.typography.titleLarge)
-                    Text(connectionMessage(state))
-                    OutlinedTextField(
-                        value = authKeyText,
-                        onValueChange = { authKeyText = it; prefs.edit().putString("auth_key", it.trim()).apply() },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Xiaomi pairing / auth key") },
-                        supportingText = { Text("32 hexadecimal characters. Keep this key private; Miit stores it only on this device.") },
-                        visualTransformation = PasswordVisualTransformation(),
-                        singleLine = true
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { MiitTestLog.add("User tapped Scan for band"); scanner.startScan() }) {
-                            Text(if (state == BandConnectionState.Scanning) "Scanning…" else "Scan for band")
-                        }
-                        if (state == BandConnectionState.Scanning) {
-                            Button(onClick = { MiitTestLog.add("User tapped Stop scan"); scanner.stopScan() }) { Text("Stop") }
-                        }
+    val authenticatedDevice = devices.firstOrNull { it.authenticated }
+
+    LaunchedEffect(authenticatedDevice?.address, connectionState) {
+        when {
+            authenticatedDevice != null && screen == MiitScreen.CONNECTION -> screen = MiitScreen.BAND
+            authenticatedDevice == null &&
+                connectionState != BandConnectionState.Authenticating &&
+                connectionState != BandConnectionState.Connecting &&
+                screen == MiitScreen.BAND -> screen = MiitScreen.CONNECTION
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { scanner.close() }
+    }
+
+    when (screen) {
+        MiitScreen.CONNECTION -> ConnectionScreen(
+            scanner = scanner,
+            devices = devices,
+            state = connectionState,
+            authKeyText = authKeyText,
+            onAuthKeyChange = {
+                authKeyText = it
+                prefs.edit().putString("auth_key", it.trim()).apply()
+            },
+            onConnected = {
+                if (authenticatedDevice != null) screen = MiitScreen.BAND
+            },
+            onOpenInstructions = { showSettings = true }
+        )
+
+        MiitScreen.BAND -> {
+            val band = authenticatedDevice
+            if (band == null) {
+                screen = MiitScreen.CONNECTION
+            } else {
+                BandScreen(
+                    band = band,
+                    onSettings = { showSettings = true },
+                    onEdit = { display ->
+                        editingDisplay = display
+                        screen = MiitScreen.EDITOR
+                    },
+                    onCustomDisplay = {
+                        editingDisplay = null
+                        screen = MiitScreen.EDITOR
                     }
-                    if (devices.any { it.authenticated }) {
-                        val connected = devices.first { it.authenticated }
-                        Card(Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text("Band connection", style = MaterialTheme.typography.titleMedium)
-                                Text("✓ ${connected.name}")
-                                Text("Authenticated over Xiaomi SPPv2")
-                                Text("The Bluetooth/SPP connection is active. Device-data initialization can now run.")
+                )
+            }
+        }
+
+        MiitScreen.EDITOR -> EditorScreen(
+            displayName = editingDisplay,
+            onBack = { screen = MiitScreen.BAND },
+            onAction = { action ->
+                when (action) {
+                    "save" -> {
+                        prefs.edit().putString("last_display", editingDisplay ?: "Custom display").apply()
+                        Toast.makeText(context, "Display saved on this phone.", Toast.LENGTH_SHORT).show()
+                    }
+                    "share" -> {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, "Miit display: ${editingDisplay ?: "Custom display"}")
+                        }
+                        context.startActivity(Intent.createChooser(send, "Share display"))
+                    }
+                    "band" -> Toast.makeText(
+                        context,
+                        "Display prepared. Band display installation will use the active Xiaomi transport.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        )
+    }
+
+    if (showSettings) {
+        SettingsDialog(onDismiss = { showSettings = false })
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConnectionScreen(
+    scanner: BandScanner,
+    devices: List<BandDevice>,
+    state: BandConnectionState,
+    authKeyText: String,
+    onAuthKeyChange: (String) -> Unit,
+    onConnected: () -> Unit,
+    onOpenInstructions: () -> Unit
+) {
+    val context = LocalContext.current
+    Scaffold(
+        topBar = { TopAppBar(title = { Text("Connect your Xiaomi Band") }) }
+    ) { padding ->
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Before connection", style = MaterialTheme.typography.headlineSmall)
+                        Text(connectionInstruction(state))
+                        OutlinedButton(onClick = onOpenInstructions, Modifier.fillMaxWidth()) {
+                            Text("Connection instructions")
+                        }
+                        OutlinedTextField(
+                            value = authKeyText,
+                            onValueChange = onAuthKeyChange,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Xiaomi auth / pairing key") },
+                            supportingText = { Text("32 hexadecimal characters. This value is device-specific and stays on the phone.") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    MiitTestLog.add("User tapped Scan for band")
+                                    scanner.startScan()
+                                },
+                                enabled = state != BandConnectionState.Connecting &&
+                                    state != BandConnectionState.Authenticating
+                            ) {
+                                Text(if (state == BandConnectionState.Scanning) "Scanning…" else "Scan")
+                            }
+                            if (state == BandConnectionState.Scanning) {
+                                OutlinedButton(onClick = {
+                                    MiitTestLog.add("User tapped Stop scan")
+                                    scanner.stopScan()
+                                }) { Text("Stop") }
                             }
                         }
                     }
-                    Button(
-                        onClick = {
-                            val log = MiitTestLog.text(context)
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("Miit testing logs", log))
-                            Toast.makeText(context, "Testing log copied. Paste it into ChatGPT.", Toast.LENGTH_LONG).show()
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("📋 Copy testing logs") }
-                    Button(onClick = { MiitTestLog.clear(); Toast.makeText(context, "Testing log cleared", Toast.LENGTH_SHORT).show() }, modifier = Modifier.fillMaxWidth()) { Text("Clear testing logs") }
                 }
             }
+
+            if (state == BandConnectionState.Authenticated) {
+                item {
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Connection successful", style = MaterialTheme.typography.titleLarge)
+                            Text("The Xiaomi SPPv2 session is authenticated.")
+                            Button(onClick = onConnected, Modifier.fillMaxWidth()) { Text("Continue to band") }
+                        }
+                    }
+                }
+            }
+
+            if (devices.isNotEmpty()) {
+                item { Text("Nearby Xiaomi bands", style = MaterialTheme.typography.titleLarge) }
+                items(devices, key = { it.address }) { device ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(device.name, style = MaterialTheme.typography.titleMedium)
+                            Text(if (device.authenticated) "✓ Connected and authenticated" else "Available")
+                            Text("Signal: ${device.rssi} dBm")
+                            Button(
+                                onClick = {
+                                    val key = AuthKeyParser.parse(authKeyText)
+                                    if (key == null) {
+                                        Toast.makeText(context, "Enter a valid 32-character hexadecimal auth key first.", Toast.LENGTH_LONG).show()
+                                    } else {
+                                        MiitTestLog.add("User tapped Connect: ${device.name} (${device.address})")
+                                        scanner.connect(device, key)
+                                    }
+                                },
+                                enabled = !device.connected && !device.authenticated
+                            ) { Text("Connect") }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Button(
+                    onClick = {
+                        val log = MiitTestLog.text(context)
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("Miit testing logs", log))
+                        Toast.makeText(context, "Testing log copied.", Toast.LENGTH_LONG).show()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Copy testing logs") }
+            }
         }
-        if (devices.isNotEmpty()) {
-            item { Text("Detected bands", style = MaterialTheme.typography.titleLarge) }
-            items(devices, key = { it.address }) { device ->
-                BandDeviceCard(device) {
-                    val key = AuthKeyParser.parse(authKeyText)
-                    if (key == null) {
-                        Toast.makeText(context, "Enter a valid 32-character hexadecimal auth key first.", Toast.LENGTH_LONG).show()
-                    } else {
-                        MiitTestLog.add("User tapped Connect: ${device.name} (${device.address})")
-                        scanner.connect(device, key)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BandScreen(
+    band: BandDevice,
+    onSettings: () -> Unit,
+    onEdit: (String) -> Unit,
+    onCustomDisplay: () -> Unit
+) {
+    val displays = listOf("Current display", "Minimal digital", "Classic dashboard")
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(band.name)
+                        Text("Connected & authenticated", style = MaterialTheme.typography.labelSmall)
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onSettings) {
+                        Text("⚙", style = MaterialTheme.typography.titleLarge)
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Band details", style = MaterialTheme.typography.titleMedium)
+                    Text("Battery: ${band.batteryPercentage?.let { "$it%" } ?: "—"}")
+                    Text("Version: ${band.firmware ?: "—"}")
+                    Text("Country variant: ${band.countryVariant ?: "—"}")
+                    Text("Model: ${band.model ?: "—"}")
+                }
+            }
+
+            Text("Band displays", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "Displays retrieved from the band will appear here. Editing is available for supported display projects.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(displays) { display ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(Modifier.padding(top = 4.dp)) {
+                                Text(display, style = MaterialTheme.typography.titleMedium)
+                                Text("Xiaomi Band display project")
+                            }
+                            Button(onClick = { onEdit(display) }) { Text("Edit") }
+                        }
+                    }
+                }
+            }
+            Button(onClick = onCustomDisplay, Modifier.fillMaxWidth()) {
+                Text("＋ Custom display")
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditorScreen(
+    displayName: String?,
+    onBack: () -> Unit,
+    onAction: (String) -> Unit
+) {
+    var tool by remember { mutableStateOf("Select") }
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(displayName ?: "Custom display") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Text("‹", style = MaterialTheme.typography.headlineMedium) }
+                },
+                actions = {
+                    IconButton(onClick = { menuExpanded = true }) { Text("⋮", style = MaterialTheme.typography.headlineMedium) }
+                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Save on phone") },
+                            onClick = { menuExpanded = false; onAction("save") }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Share") },
+                            onClick = { menuExpanded = false; onAction("share") }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Set as band display") },
+                            onClick = { menuExpanded = false; onAction("band") }
+                        )
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Card(Modifier.fillMaxWidth().weight(1f)) {
+                Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Editor", style = MaterialTheme.typography.titleLarge)
+                    Text("Canvas preview", style = MaterialTheme.typography.titleMedium)
+                    Card(Modifier.fillMaxWidth().weight(1f)) {
+                        Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
+                            Text("12:45", style = MaterialTheme.typography.displayLarge)
+                            Spacer(Modifier.height(8.dp))
+                            Text("Tuesday  •  25 Aug")
+                            Spacer(Modifier.height(16.dp))
+                            Text("♥ 72   •   6,421 steps")
+                        }
+                    }
+                }
+            }
+
+            LazyColumn(Modifier.fillMaxWidth(), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("Select", "Text", "Image", "Shape", "AI", "Font").forEach { toolName ->
+                            Button(onClick = { tool = toolName }) {
+                                Text(if (tool == toolName) "✓ $toolName" else toolName)
+                            }
+                        }
                     }
                 }
             }
         }
-        item { Text("My displays", style = MaterialTheme.typography.titleLarge) }
-        items(saved) { name ->
-            Card(Modifier.fillMaxWidth()) {
-                Row(Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(name); Button(onClick = onEditor) { Text("Edit") }
-                }
-            }
-        }
-        item { Button(onClick = onEditor, Modifier.fillMaxWidth()) { Text("＋ Create from scratch") } }
     }
 }
 
 @Composable
-private fun BandDeviceCard(device: BandDevice, onConnect: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(device.name, style = MaterialTheme.typography.titleMedium)
-            if (device.authenticated) {
-                Text("✓ Connected & authenticated", style = MaterialTheme.typography.titleMedium)
-                Text("Xiaomi SPPv2 session is active. Miit is ready for device initialization/data.")
-            } else if (device.connected) {
-                Text("Connected — authentication in progress")
-            } else {
-                Text("Not connected")
+private fun SettingsDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Miit settings") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("App")
+                Text("Keep Xiaomi auth data on this device and never embed a user's key into the app.")
+                Text("Band")
+                Text("Communication is device/profile based; band-specific values are detected at runtime.")
+                Text("Editor")
+                Text("Manage local displays, fonts and AI provider settings here.")
             }
-            Text("Signal: ${device.rssi} dBm")
-            Text("Address: ${device.address}")
-            device.model?.let { Text("Model: $it") }
-            device.firmware?.let { Text("Firmware: $it") }
-            device.manufacturer?.let { Text("Manufacturer: $it") }
-            Spacer(Modifier.height(6.dp))
-            Button(onClick = onConnect, enabled = !device.connected && !device.authenticated) {
-                Text(if (device.authenticated) "Connected" else "Connect")
-            }
-        }
-    }
-}
-
-private fun connectionMessage(state: BandConnectionState): String = when (state) {
-    BandConnectionState.Idle -> "Ready to scan for nearby Mi Band / Xiaomi Smart Band devices."
-    BandConnectionState.Scanning -> "Scanning… keep the band nearby and awake."
-    BandConnectionState.Connecting -> "Pairing / connecting…"
-    BandConnectionState.Connected -> "Xiaomi transport connected; waiting for authentication."
-    BandConnectionState.AwaitingXiaomiBinding -> "Android pairing is complete. Enter the Xiaomi auth key to continue binding."
-    BandConnectionState.Authenticating -> "Authenticating with the band…"
-    BandConnectionState.Authenticated -> "Connected and authenticated. Xiaomi SPPv2 is active."
-    BandConnectionState.Disconnected -> "Band disconnected."
-    BandConnectionState.Error -> "Bluetooth/authentication failed. Check the key and try again."
-}
-
-@Composable
-private fun EditorScreen() {
-    var tool by remember { mutableStateOf("Select") }
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Watchface editor", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(12.dp))
-        Card(Modifier.fillMaxWidth().weight(1f)) {
-            Column(Modifier.fillMaxSize().padding(16.dp)) {
-                Text("Canvas preview", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(12.dp))
-                Column(Modifier.fillMaxWidth().weight(1f).padding(24.dp)) {
-                    Text("12:45", style = MaterialTheme.typography.displayLarge)
-                    Text("Tuesday  •  25 Aug")
-                    Spacer(Modifier.height(20.dp))
-                    Text("♥ 72   •   6,421 steps")
-                }
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("Select", "Text", "Image", "Shape", "AI", "Font").forEach { t ->
-                FilterChip(selected = tool == t, onClick = { tool = t }, label = { Text(t) })
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = {}) { Text("Save") }
-            Button(onClick = {}) { Text("Send to band") }
-        }
-    }
-}
-
-@Composable
-private fun SettingsScreen() {
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Settings", style = MaterialTheme.typography.headlineSmall)
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Text("AI providers", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(6.dp))
-                Text("Add your own API keys. Miit will keep provider configuration local to the device.")
-                Spacer(Modifier.height(12.dp))
-                listOf("Local / offline AI", "OpenAI-compatible API", "Google AI-compatible API").forEach { Text("• $it") }
-            }
-        }
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Text("Fonts", style = MaterialTheme.typography.titleMedium)
-                Text("Use Android/device fonts, imported font files, and Google Fonts where licensing permits.")
-            }
-        }
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Text("Compatibility", style = MaterialTheme.typography.titleMedium)
-                Text("Device-specific communication and compiler modules are designed to be replaceable per band family and firmware format.")
-            }
-        }
-    }
+        },
+        confirmButton = { Button(onClick = onDismiss) { Text("Done") } }
+    )
 }
