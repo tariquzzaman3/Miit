@@ -1,14 +1,5 @@
 package com.miit.app.band
 
-/** A display entry reported by the connected Xiaomi band. */
-data class BandDisplay(
-    val code: String,
-    val name: String,
-    val disabled: Boolean = false,
-    val isSettings: Int = 0,
-    val inMoreSection: Boolean = false
-)
-
 /** Runtime updates received from the connected Xiaomi band. */
 data class BandDataUpdate(
     val batteryPercentage: Int? = null,
