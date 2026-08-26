@@ -8,6 +8,8 @@ data class BandDevice(
     val model: String? = null,
     val firmware: String? = null,
     val manufacturer: String? = null,
+    val batteryPercentage: Int? = null,
+    val countryVariant: String? = null,
     val connected: Boolean = false,
     val authenticated: Boolean = false
 )
