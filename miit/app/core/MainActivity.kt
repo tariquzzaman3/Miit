@@ -83,6 +83,7 @@ private fun MiitApp() {
     var authKeyText by remember { mutableStateOf(prefs.getString("auth_key", "") ?: "") }
     var screen by remember { mutableStateOf(MiitScreen.CONNECTION) }
     var showSettings by remember { mutableStateOf(false) }
+    var showInstructions by remember { mutableStateOf(false) }
     var editingDisplay by remember { mutableStateOf<String?>(null) }
 
     val authenticatedDevice = devices.firstOrNull { it.authenticated }
@@ -114,7 +115,7 @@ private fun MiitApp() {
             onConnected = {
                 if (authenticatedDevice != null) screen = MiitScreen.BAND
             },
-            onOpenInstructions = { showSettings = true }
+            onOpenInstructions = { showInstructions = true }
         )
 
         MiitScreen.BAND -> {
@@ -163,6 +164,9 @@ private fun MiitApp() {
         )
     }
 
+    if (showInstructions) {
+        InstructionsDialog(onDismiss = { showInstructions = false })
+    }
     if (showSettings) {
         SettingsDialog(onDismiss = { showSettings = false })
     }
@@ -213,7 +217,7 @@ private fun ConnectionScreen(
                                 enabled = state != BandConnectionState.Connecting &&
                                     state != BandConnectionState.Authenticating
                             ) {
-                                Text(if (state == BandConnectionState.Scanning) "Scanning…" else "Scan")
+                                Text(if (state == BandConnectionState.Scanning) "Scanning…" else "Scan for band")
                             }
                             if (state == BandConnectionState.Scanning) {
                                 OutlinedButton(onClick = {
@@ -402,7 +406,6 @@ private fun EditorScreen(
                     }
                 }
             }
-
             LazyColumn(Modifier.fillMaxWidth(), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -416,6 +419,25 @@ private fun EditorScreen(
             }
         }
     }
+}
+
+@Composable
+private fun InstructionsDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("How to connect") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("1. Enter the Xiaomi pairing/auth key supplied for the band.")
+                Text("2. Tap Scan for band and select the matching Xiaomi Smart Band.")
+                Text("3. Allow Android's system pairing/association request when it appears.")
+                Text("4. Wait while Android bonding, RFCOMM/SPP, session negotiation and Xiaomi authentication complete.")
+                Text("5. Do not press Connect repeatedly during the pairing process.")
+                Text("The auth key is device-specific. Miit must never hard-code another user's key.")
+            }
+        },
+        confirmButton = { Button(onClick = onDismiss) { Text("Got it") } }
+    )
 }
 
 @Composable
@@ -435,4 +457,16 @@ private fun SettingsDialog(onDismiss: () -> Unit) {
         },
         confirmButton = { Button(onClick = onDismiss) { Text("Done") } }
     )
+}
+
+private fun connectionInstruction(state: BandConnectionState): String = when (state) {
+    BandConnectionState.Idle -> "Enter the Xiaomi auth key, scan, select your band, then allow Android's pairing request."
+    BandConnectionState.Scanning -> "Keep the band awake and nearby. Select it when it appears."
+    BandConnectionState.Connecting -> "Android is bonding with the band. Wait for pairing to finish; do not press Connect repeatedly."
+    BandConnectionState.Connected -> "Bluetooth transport is connected; Xiaomi authentication is continuing."
+    BandConnectionState.AwaitingXiaomiBinding -> "Android pairing is complete. Miit is continuing the Xiaomi binding process."
+    BandConnectionState.Authenticating -> "Xiaomi authentication is in progress. Keep the band nearby."
+    BandConnectionState.Authenticated -> "Authentication succeeded. Continue to the band screen."
+    BandConnectionState.Disconnected -> "The band disconnected. Scan and connect again."
+    BandConnectionState.Error -> "Connection failed. Check the auth key and accept Android's pairing request, then try again."
 }
