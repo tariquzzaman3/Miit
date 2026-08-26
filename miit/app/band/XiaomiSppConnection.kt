@@ -19,6 +19,13 @@ import org.bouncycastle.crypto.modes.CCMBlockCipher
 import org.bouncycastle.crypto.params.AEADParameters
 import org.bouncycastle.crypto.params.KeyParameter
 
+/**
+ * Bluetooth Classic RFCOMM/SPP transport used by Xiaomi Smart Band 9.
+ *
+ * The state machine mirrors the successful Gadgetbridge sequence:
+ * RFCOMM -> SPPv1 version request -> SPPv2 session negotiation -> Xiaomi auth.
+ * All device-specific values are supplied at runtime.
+ */
 class XiaomiSppConnection(
     private val device: BluetoothDevice,
     private val authKey: ByteArray,
@@ -29,8 +36,15 @@ class XiaomiSppConnection(
         private val SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
         private val V1_MAGIC = byteArrayOf(0xBA.toByte(), 0xDC.toByte(), 0xFE.toByte())
         private val V2_MAGIC = byteArrayOf(0xA5.toByte(), 0xA5.toByte())
-        private val V1_VERSION_REQUEST = byteArrayOf(0xBA.toByte(),0xDC.toByte(),0xFE.toByte(),0x00,0xC0.toByte(),0x03,0x00,0x00,0x00,0x00,0xEF.toByte())
+        private val V1_VERSION_REQUEST = byteArrayOf(
+            0xBA.toByte(), 0xDC.toByte(), 0xFE.toByte(),
+            0x00, 0xC0.toByte(),
+            0x03, 0x00,
+            0x00, 0x00, 0x00,
+            0xEF.toByte()
+        )
     }
+
     @Volatile private var running = false
     @Volatile private var authenticated = false
     private var socket: BluetoothSocket? = null
@@ -43,100 +57,557 @@ class XiaomiSppConnection(
     private var parserVersion = 1
     private var auth: XiaomiSppAuthenticator? = null
 
-    @SuppressLint("MissingPermission") fun connect() {
-        if (running) return
-        if (authKey.size != 16) { onEvent("SPP auth key invalid: expected 16 bytes"); onState(BandConnectionState.Error); return }
+    @SuppressLint("MissingPermission")
+    fun connect() {
+        if (running) {
+            onEvent("Xiaomi SPP: connect ignored; already running")
+            return
+        }
+        if (authKey.size != 16) {
+            onEvent("Xiaomi SPP: auth key invalid; expected 16 bytes")
+            onState(BandConnectionState.Error)
+            return
+        }
         worker = Thread({ runConnection() }, "Miit-Xiaomi-SPP").also { it.start() }
     }
-    fun close() { running=false; runCatching { socket?.close() }; worker?.interrupt(); worker=null; socket=null; input=null; output=null }
 
-    @SuppressLint("MissingPermission") private fun runConnection() {
-        running=true
+    fun close() {
+        running = false
+        runCatching { socket?.close() }
+        runCatching { worker?.interrupt() }
+        worker = null
+        socket = null
+        input = null
+        output = null
+        authenticated = false
+        auth = null
+        rxBuffer.reset()
+        parserVersion = 1
+        txSequence.set(0)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun runConnection() {
+        running = true
         try {
             onState(BandConnectionState.Connecting)
             onEvent("Xiaomi SPP: opening RFCOMM socket uuid=$SPP_UUID")
-            val s=device.createRfcommSocketToServiceRecord(SPP_UUID); socket=s; s.connect()
-            input=s.inputStream; output=s.outputStream
-            onEvent("Xiaomi SPP: RFCOMM connected"); onState(BandConnectionState.Connected)
-            sendRaw(V1_VERSION_REQUEST); onEvent("Xiaomi SPP: sent V1 protocol-version request")
-            val buf=ByteArray(4096)
-            while(running){ val n=input?.read(buf) ?: -1; if(n<0) break; if(n>0){rxBuffer.write(buf,0,n); parseAvailable()} }
-        } catch(t:Throwable){ if(running) onEvent("Xiaomi SPP connection error: ${t.javaClass.simpleName}: ${t.message ?: "unknown"}") }
-        finally { running=false; runCatching{socket?.close()}; socket=null; input=null; output=null; if(authenticated) onState(BandConnectionState.Disconnected) else onState(BandConnectionState.Error) }
-    }
-    private fun parseAvailable(){
-        while(true){
-            val data=rxBuffer.toByteArray(); if(data.isEmpty()) return
-            val magic=if(parserVersion==1)V1_MAGIC else V2_MAGIC; val offset=indexOfMagic(data,magic)
-            if(offset<0){rxBuffer.reset(); if(data.size>=magic.size-1) rxBuffer.write(data.copyOfRange(data.size-(magic.size-1),data.size)); return}
-            if(offset>0){consume(offset); continue}
-            val progressed=if(parserVersion==1)parseV1(data) else parseV2(data); if(!progressed) return
+            val s = device.createRfcommSocketToServiceRecord(SPP_UUID)
+            socket = s
+            s.connect()
+            input = s.inputStream
+            output = s.outputStream
+            onEvent("Xiaomi SPP: RFCOMM connected")
+            onState(BandConnectionState.Connecting)
+            sendRaw(V1_VERSION_REQUEST)
+            onEvent("Xiaomi SPP: sent SPPv1 version request")
+
+            val buf = ByteArray(4096)
+            while (running) {
+                val n = input?.read(buf) ?: -1
+                if (n < 0) break
+                if (n == 0) continue
+                rxBuffer.write(buf, 0, n)
+                parseAvailable()
+            }
+        } catch (t: Throwable) {
+            if (running) {
+                onEvent("Xiaomi SPP connection error: ${t.javaClass.simpleName}: ${t.message ?: "unknown"}")
+            }
+        } finally {
+            val wasAuthenticated = authenticated
+            running = false
+            runCatching { socket?.close() }
+            socket = null
+            input = null
+            output = null
+            auth = null
+            if (wasAuthenticated) onState(BandConnectionState.Disconnected) else onState(BandConnectionState.Error)
         }
     }
-    private fun parseV1(data:ByteArray):Boolean{
-        if(data.size<11) return false; val len=u16le(data,5); if(len<3) return false; val total=8+len
-        if(data.size<total) return false; if(data[total-1]!=0xEF.toByte()){consume(1);return true}
-        val opcode=data[7].toInt() and 255; val payload=data.copyOfRange(10,total-1); consume(total)
-        onEvent("Xiaomi SPP V1: opcode=$opcode payload=${payload.size}")
-        if(data[3].toInt() and 255==0 && opcode==1 && payload.size==3){
-            val version=payload.joinToString(""){ "%02X".format(it) }; onEvent("Xiaomi SPP: protocol version=$version")
-            if(version=="020109"){parserVersion=2; onEvent("Xiaomi SPP: switching to V2"); sendSessionConfig()}
+
+    private fun parseAvailable() {
+        while (true) {
+            val data = rxBuffer.toByteArray()
+            if (data.isEmpty()) return
+            val magic = if (parserVersion == 1) V1_MAGIC else V2_MAGIC
+            val offset = indexOfMagic(data, magic)
+            if (offset < 0) {
+                rxBuffer.reset()
+                val keep = magic.size - 1
+                if (data.size >= keep) rxBuffer.write(data, data.size - keep, keep) else rxBuffer.write(data)
+                return
+            }
+            if (offset > 0) {
+                consume(offset)
+                continue
+            }
+            val progressed = if (parserVersion == 1) parseV1(data) else parseV2(data)
+            if (!progressed) return
+        }
+    }
+
+    private fun parseV1(data: ByteArray): Boolean {
+        if (data.size < 11) return false
+        val payloadHeaderLength = u16le(data, 5)
+        if (payloadHeaderLength < 3) {
+            onEvent("Xiaomi SPPv1: invalid payload length=$payloadHeaderLength")
+            consume(1)
+            return true
+        }
+        val payloadLength = payloadHeaderLength - 3
+        val totalLength = 11 + payloadLength
+        if (data.size < totalLength) return false
+        if (data[totalLength - 1] != 0xEF.toByte()) {
+            onEvent("Xiaomi SPPv1: invalid epilogue")
+            consume(1)
+            return true
+        }
+        val channel = data[3].toInt() and 0x0F
+        val flags = data[4].toInt() and 0xFF
+        val opcode = data[7].toInt() and 0xFF
+        val serial = data[8].toInt() and 0xFF
+        val dataType = data[9].toInt() and 0xFF
+        val payload = data.copyOfRange(10, 10 + payloadLength)
+        consume(totalLength)
+        onEvent("Xiaomi SPPv1 packet: channel=$channel flags=0x${flags.toString(16)} opcode=$opcode serial=$serial type=$dataType payload=${payload.size}")
+        if (channel == 0 && opcode == 1 && dataType == 0 && payload.size == 3) {
+            val version = payload.joinToString("") { "%02X".format(it.toInt() and 0xFF) }
+            onEvent("Xiaomi SPP: protocol version=$version")
+            if (payload.contentEquals(byteArrayOf(0x02, 0x01, 0x09))) {
+                parserVersion = 2
+                onEvent("Xiaomi SPP: switching to SPPv2")
+                sendSessionConfig()
+            } else {
+                onEvent("Xiaomi SPP: unsupported protocol version=$version")
+                onState(BandConnectionState.Error)
+                running = false
+            }
         }
         return true
     }
-    private fun sendSessionConfig(){
-        val payload=byteArrayOf(1,1,3,0,1,0,0,2,2,0,0,0xFC.toByte(),3,2,0,0x20,0,4,2,0,0x10,0x27)
-        sendRaw(encodeV2(2,0,payload)); onEvent("Xiaomi SPP: sent V2 session config")
+
+    private fun sendSessionConfig() {
+        val payload = byteArrayOf(
+            0x01,
+            0x01, 0x03, 0x00, 0x01, 0x00, 0x00,
+            0x02, 0x02, 0x00, 0x00, 0xFC.toByte(),
+            0x03, 0x02, 0x00, 0x20, 0x00,
+            0x04, 0x02, 0x00, 0x10, 0x27
+        )
+        sendRaw(encodeV2(packetType = 2, sequence = 0, payload = payload))
+        onEvent("Xiaomi SPP: sent SPPv2 session config")
     }
-    private fun parseV2(data:ByteArray):Boolean{
-        if(data.size<8) return false; val type=data[2].toInt() and 15; val seq=data[3].toInt() and 255; val len=u16le(data,4); val total=8+len; if(data.size<total)return false
-        val payload=data.copyOfRange(8,total); val given=u16le(data,6); val calc=crc(payload); if(given!=calc){onEvent("Xiaomi SPP V2 CRC mismatch seq=$seq");consume(1);return true}; consume(total)
-        when(type){
-            1->onEvent("Xiaomi SPP V2 ACK seq=$seq")
-            2->{val op=payload.firstOrNull()?.toInt()?.and(255) ?: -1; onEvent("Xiaomi SPP V2 session response opcode=$op"); if(op==2) startAuth()}
-            3->{if(payload.size<2)return true; val channel=payload[0].toInt() and 15; val op=payload[1].toInt() and 255; val body=payload.copyOfRange(2,payload.size); sendAck(seq); if(channel==1){val plain=if(op==2&&authenticated)auth?.decryptV2(body)?:body else body; auth?.handleCommand(plain)}}
-        }; return true
+
+    private fun parseV2(data: ByteArray): Boolean {
+        if (data.size < 8) return false
+        val packetType = data[2].toInt() and 0x0F
+        val sequence = data[3].toInt() and 0xFF
+        val payloadLength = u16le(data, 4)
+        val totalLength = 8 + payloadLength
+        if (data.size < totalLength) return false
+        val givenChecksum = u16le(data, 6)
+        val payload = data.copyOfRange(8, totalLength)
+        val calculatedChecksum = crc16(payload)
+        if (givenChecksum != calculatedChecksum) {
+            onEvent("Xiaomi SPPv2 checksum mismatch seq=$sequence given=0x${givenChecksum.toString(16)} calculated=0x${calculatedChecksum.toString(16)}")
+            consume(1)
+            return true
+        }
+        consume(totalLength)
+
+        when (packetType) {
+            1 -> onEvent("Xiaomi SPPv2 ACK sequence=$sequence")
+            2 -> {
+                val opcode = payload.firstOrNull()?.toInt()?.and(0xFF) ?: -1
+                onEvent("Xiaomi SPPv2 session response opcode=$opcode")
+                if (opcode == 2) startAuthentication()
+            }
+            3 -> {
+                if (payload.size < 2) {
+                    onEvent("Xiaomi SPPv2 data packet too short")
+                    return true
+                }
+                val rawChannel = payload[0].toInt() and 0x0F
+                val opcode = payload[1].toInt() and 0xFF
+                val body = payload.copyOfRange(2, payload.size)
+                onEvent("Xiaomi SPPv2 data: channel=$rawChannel opcode=$opcode bytes=${body.size}")
+                // Gadgetbridge processes the command before acknowledging the received frame.
+                if (rawChannel == 1) {
+                    val commandBody = if (opcode == 2 && authenticated) auth?.decryptV2(body) ?: body else body
+                    auth?.handleCommand(commandBody)
+                }
+                sendAck(sequence)
+            }
+            else -> onEvent("Xiaomi SPPv2 unsupported packet type=$packetType sequence=$sequence")
+        }
+        return true
     }
-    private fun startAuth(){if(auth!=null)return; onState(BandConnectionState.Authenticating); auth=XiaomiSppAuthenticator(authKey,{e->onEvent("Xiaomi auth: $e")},{ok->{authenticated=ok;onState(if(ok)BandConnectionState.Authenticated else BandConnectionState.Error)}}){p->sendData(p)};auth?.start()}
-    private fun sendAck(seq:Int)=sendRaw(encodeV2(1,seq,ByteArray(0)))
-    private fun sendData(payload:ByteArray){val raw=byteArrayOf(1,1)+payload; val seq=txSequence.getAndIncrement() and 255; sendRaw(encodeV2(3,seq,raw)); onEvent("Xiaomi SPP: sent data seq=$seq bytes=${payload.size}")}
-    private fun encodeV2(type:Int,seq:Int,payload:ByteArray):ByteArray{val o=ByteArray(8+payload.size);o[0]=0xA5.toByte();o[1]=0xA5.toByte();o[2]=(type and 15).toByte();o[3]=(seq and 255).toByte();putU16le(o,4,payload.size);putU16le(o,6,crc(payload));payload.copyInto(o,8);return o}
-    private fun sendRaw(b:ByteArray){synchronized(writeLock){output?.write(b);output?.flush()}}
-    private fun consume(n:Int){val d=rxBuffer.toByteArray();rxBuffer.reset();if(n<d.size)rxBuffer.write(d,n,d.size-n)}
-    private fun indexOfMagic(d:ByteArray,m:ByteArray):Int{if(d.size<m.size)return -1;for(i in 0..d.size-m.size)if(d.copyOfRange(i,i+m.size).contentEquals(m))return i;return -1}
-    private fun u16le(d:ByteArray,o:Int)=(d[o].toInt() and 255) or ((d[o+1].toInt() and 255) shl 8)
-    private fun putU16le(d:ByteArray,o:Int,v:Int){d[o]=v.toByte();d[o+1]=(v ushr 8).toByte()}
-    private fun crc(p:ByteArray):Int{var c=0;for(b in p)for(j in 0 until 8){c=c shl 1;if((((c ushr 16) and 1) xor ((b.toInt() ushr j) and 1))==1)c=c xor 0x8005};return Integer.reverse(c) ushr 16}
+
+    private fun startAuthentication() {
+        if (auth != null) return
+        onState(BandConnectionState.Authenticating)
+        auth = XiaomiSppAuthenticator(
+            secretKey = authKey.copyOf(),
+            onEvent = { event -> onEvent("Xiaomi auth: $event") },
+            onResult = { success ->
+                authenticated = success
+                onState(if (success) BandConnectionState.Authenticated else BandConnectionState.Error)
+                if (success) onEvent("Xiaomi auth: initialized")
+            },
+            sendPlain = { payload -> sendData(payload, encrypted = false) }
+        )
+        auth?.start()
+    }
+
+    private fun sendAck(sequence: Int) {
+        sendRaw(encodeV2(packetType = 1, sequence = sequence, payload = ByteArray(0)))
+        onEvent("Xiaomi SPPv2: sent ACK sequence=$sequence")
+    }
+
+    private fun sendData(payload: ByteArray, encrypted: Boolean) {
+        val opcode = if (encrypted) 2 else 1
+        val raw = ByteArray(2 + payload.size)
+        raw[0] = 1
+        raw[1] = opcode.toByte()
+        payload.copyInto(raw, 2)
+        val sequence = txSequence.getAndIncrement() and 0xFF
+        sendRaw(encodeV2(packetType = 3, sequence = sequence, payload = raw))
+        onEvent("Xiaomi SPPv2: sent data sequence=$sequence opcode=$opcode bytes=${payload.size}")
+    }
+
+    private fun encodeV2(packetType: Int, sequence: Int, payload: ByteArray): ByteArray {
+        val out = ByteArray(8 + payload.size)
+        out[0] = 0xA5.toByte()
+        out[1] = 0xA5.toByte()
+        out[2] = (packetType and 0x0F).toByte()
+        out[3] = (sequence and 0xFF).toByte()
+        putU16le(out, 4, payload.size)
+        putU16le(out, 6, crc16(payload))
+        payload.copyInto(out, 8)
+        return out
+    }
+
+    private fun sendRaw(bytes: ByteArray) {
+        synchronized(writeLock) {
+            val stream = output ?: throw IllegalStateException("RFCOMM output stream is not ready")
+            stream.write(bytes)
+            stream.flush()
+        }
+    }
+
+    private fun consume(count: Int) {
+        if (count <= 0) return
+        val current = rxBuffer.toByteArray()
+        rxBuffer.reset()
+        if (count < current.size) rxBuffer.write(current, count, current.size - count)
+    }
+
+    private fun indexOfMagic(data: ByteArray, magic: ByteArray): Int {
+        if (data.size < magic.size) return -1
+        for (i in 0..(data.size - magic.size)) {
+            if (data.copyOfRange(i, i + magic.size).contentEquals(magic)) return i
+        }
+        return -1
+    }
+
+    private fun u16le(data: ByteArray, offset: Int): Int =
+        (data[offset].toInt() and 0xFF) or ((data[offset + 1].toInt() and 0xFF) shl 8)
+
+    private fun putU16le(data: ByteArray, offset: Int, value: Int) {
+        data[offset] = value.toByte()
+        data[offset + 1] = (value ushr 8).toByte()
+    }
+
+    private fun crc16(payload: ByteArray): Int {
+        var crc = 0
+        for (b in payload) {
+            for (bit in 0 until 8) {
+                crc = crc shl 1
+                if ((((crc ushr 16) and 1) xor ((b.toInt() ushr bit) and 1)) == 1) crc = crc xor 0x8005
+            }
+        }
+        return Integer.reverse(crc) ushr 16
+    }
 }
 
-private class XiaomiSppAuthenticator(private val secretKey:ByteArray,private val onEvent:(String)->Unit,private val onResult:(Boolean)->Unit,private val sendPlain:(ByteArray)->Unit){
-    private val phoneNonce=ByteArray(16); private var stage=0; private var decKey=ByteArray(16); private var encKey=ByteArray(16); private var encNonce=ByteArray(4)
-    fun start(){SecureRandom().nextBytes(phoneNonce);stage=1;val c=Proto.commandNonce(phoneNonce);onEvent("auth step 1 bytes=${c.size}");sendPlain(c)}
-    fun handleCommand(data:ByteArray):Boolean{val p=Proto.parse(data)?:return false;if(p.type!=1)return false;onEvent("response subtype=${p.subtype}");when(p.subtype){26->{val w=p.watch?:return false;if(stage!=1)return false;val d=derive(secretKey,phoneNonce,w.nonce);decKey=d.copyOfRange(0,16);encKey=d.copyOfRange(16,32);encNonce=d.copyOfRange(36,40);if(!hmac(decKey,w.nonce+phoneNonce).contentEquals(w.hmac)){onEvent("watch_hmac_mismatch");onResult(false);return true};stage=2;val ei=ccm(encKey,nonce(encNonce,0),Proto.authInfo(Build.VERSION.SDK_INT,Build.MODEL,java.util.Locale.getDefault().getLanguage()));val c=Proto.commandAuth(hmac(encKey,phoneNonce+w.nonce),ei);onEvent("auth step 2 bytes=${c.size}");sendPlain(c);return true}27->{val ok=p.status==1||p.authStatus==1;onEvent(if(ok)"authenticated":"auth_failed status=${p.status} authStatus=${p.authStatus}");if(stage==2&&ok){stage=3;onResult(true)}else onResult(false);return true}};return false}
-    fun decryptV2(b:ByteArray):ByteArray=try{val c=javax.crypto.Cipher.getInstance("AES/CTR/NoPadding");c.init(javax.crypto.Cipher.DECRYPT_MODE,SecretKeySpec(decKey,"AES"),javax.crypto.spec.IvParameterSpec(decKey));c.doFinal(b)}catch(_:Throwable){b}
-    private fun derive(s:ByteArray,p:ByteArray,w:ByteArray):ByteArray{val initial=hmac(p+w,s);val m=Mac.getInstance("HmacSHA256");m.init(SecretKeySpec(initial,"HmacSHA256"));val label="miwear-auth".toByteArray();val out=ByteArray(64);var prev=ByteArray(0);var ctr=1;var off=0;while(off<64){m.update(prev);m.update(label);m.update(ctr.toByte());prev=m.doFinal();val n=minOf(32,64-off);prev.copyInto(out,off,0,n);off+=n;ctr++};return out}
-    private fun hmac(k:ByteArray,v:ByteArray):ByteArray{val m=Mac.getInstance("HmacSHA256");m.init(SecretKeySpec(k,"HmacSHA256"));return m.doFinal(v)}
-    private fun nonce(n:ByteArray,s:Int)=ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).put(n).putInt(0).putInt(s).array()
-    private fun ccm(k:ByteArray,n:ByteArray,p:ByteArray):ByteArray{val c=CCMBlockCipher(AESEngine());c.init(true,AEADParameters(KeyParameter(k),32,n,null));val o=ByteArray(c.getOutputSize(p.size));val z=c.processBytes(p,0,p.size,o,0);c.doFinal(o,z);return o}
+/** Xiaomi authentication using the same derivation and AES-CCM parameters as Gadgetbridge. */
+private class XiaomiSppAuthenticator(
+    private val secretKey: ByteArray,
+    private val onEvent: (String) -> Unit,
+    private val onResult: (Boolean) -> Unit,
+    private val sendPlain: (ByteArray) -> Unit
+) {
+    private val phoneNonce = ByteArray(16)
+    private var stage = 0
+    private var encryptionKey = ByteArray(16)
+    private var decryptionKey = ByteArray(16)
+    private var encryptionNonce = ByteArray(4)
+
+    fun start() {
+        SecureRandom().nextBytes(phoneNonce)
+        stage = 1
+        val command = XiaomiAuthProto.commandNonce(phoneNonce)
+        onEvent("auth_step_1 bytes=${command.size}")
+        sendPlain(command)
+    }
+
+    fun handleCommand(data: ByteArray): Boolean {
+        val parsed = XiaomiAuthProto.parseCommand(data) ?: run {
+            onEvent("auth_command_unparsed bytes=${data.size}")
+            return false
+        }
+        onEvent("response subtype=${parsed.subtype}")
+        if (parsed.type != 1) return false
+
+        when (parsed.subtype) {
+            26 -> {
+                val watch = parsed.watch ?: return false
+                if (stage != 1 || watch.nonce.size != 16 || watch.hmac.size != 32) return false
+                val derived = derive(secretKey, phoneNonce, watch.nonce)
+                decryptionKey = derived.copyOfRange(0, 16)
+                encryptionKey = derived.copyOfRange(16, 32)
+                encryptionNonce = derived.copyOfRange(36, 40)
+
+                val expectedHmac = hmac(decryptionKey, watch.nonce + phoneNonce)
+                if (!expectedHmac.contentEquals(watch.hmac)) {
+                    onEvent("watch_hmac_mismatch")
+                    onResult(false)
+                    return true
+                }
+
+                stage = 2
+                val encryptedNonces = hmac(encryptionKey, phoneNonce + watch.nonce)
+                val deviceInfo = XiaomiAuthProto.authDeviceInfo(
+                    Build.VERSION.SDK_INT,
+                    Build.MODEL,
+                    java.util.Locale.getDefault().getLanguage()
+                )
+                val encryptedDeviceInfo = ccmEncrypt(
+                    encryptionKey,
+                    packetNonce(encryptionNonce, 0),
+                    deviceInfo
+                )
+                val command = XiaomiAuthProto.commandAuth(encryptedNonces, encryptedDeviceInfo)
+                onEvent("auth_step_2 bytes=${command.size}")
+                sendPlain(command)
+                return true
+            }
+            27 -> {
+                if (stage == 2) {
+                    stage = 3
+                    onEvent("authenticated")
+                    onResult(true)
+                    return true
+                }
+                onResult(false)
+                return true
+            }
+        }
+        return false
+    }
+
+    fun decryptV2(ciphertext: ByteArray): ByteArray = try {
+        val cipher = javax.crypto.Cipher.getInstance("AES/CCM/NoPadding")
+        cipher.init(javax.crypto.Cipher.DECRYPT_MODE, SecretKeySpec(decryptionKey, "AES"), javax.crypto.spec.IvParameterSpec(packetNonce(derivedNonce(), 0)))
+        cipher.doFinal(ciphertext)
+    } catch (_: Throwable) {
+        ciphertext
+    }
+
+    private fun derivedNonce(): ByteArray = ByteArray(4)
+
+    private fun derive(secret: ByteArray, phone: ByteArray, watch: ByteArray): ByteArray {
+        val initial = hmac(phone + watch, secret)
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(initial, "HmacSHA256"))
+        val label = "miwear-auth".toByteArray(Charsets.UTF_8)
+        val out = ByteArray(64)
+        var previous = ByteArray(0)
+        var counter = 1
+        var offset = 0
+        while (offset < out.size) {
+            mac.update(previous)
+            mac.update(label)
+            mac.update(counter.toByte())
+            previous = mac.doFinal()
+            val copy = minOf(previous.size, out.size - offset)
+            previous.copyInto(out, offset, 0, copy)
+            offset += copy
+            counter++
+        }
+        return out
+    }
+
+    private fun hmac(key: ByteArray, value: ByteArray): ByteArray {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(key, "HmacSHA256"))
+        return mac.doFinal(value)
+    }
+
+    private fun packetNonce(nonce4: ByteArray, sequence: Int): ByteArray =
+        ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).put(nonce4).putInt(0).putInt(sequence).array()
+
+    private fun ccmEncrypt(key: ByteArray, nonce: ByteArray, payload: ByteArray): ByteArray {
+        val cipher = CCMBlockCipher(AESEngine())
+        cipher.init(true, AEADParameters(KeyParameter(key), 32, nonce, null))
+        val out = ByteArray(cipher.getOutputSize(payload.size))
+        val count = cipher.processBytes(payload, 0, payload.size, out, 0)
+        cipher.doFinal(out, count)
+        return out
+    }
 }
 
-private object Proto{
- data class Watch(val nonce:ByteArray,val hmac:ByteArray);data class Parsed(val type:Int,val subtype:Int,val status:Int,val authStatus:Int,val watch:Watch?)
- fun commandNonce(n:ByteArray)=cmd(26,bytes(3,bytes(30,bytes(1,n))))
- fun commandAuth(en:ByteArray,ei:ByteArray)=cmd(27,bytes(3,bytes(32,bytes(1,en)+bytes(2,ei))))
- fun authInfo(api:Int,model:String,lang:String):ByteArray{val f=ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putFloat(api.toFloat()).array();return varint(1,0)+fixed(2,f)+str(3,model)+varint(4,224)+str(5,lang.take(2).uppercase())}
- fun parse(d:ByteArray):Parsed?{var p=0;var t=0;var st=0;var s=0;var w:Watch?=null;while(p<d.size){val a=rv(d,p)?:return null;p=a.n;val f=a.v ushr 3;val wire=a.v and 7;when(f){1,2->{if(wire!=0)return null;val x=rv(d,p)?:return null;p=x.n;if(f==1)t=x.v else st=x.v};3->{if(wire!=2)return null;val b=rb(d,p)?:return null;p=b.n;val x=auth(b.b);s=x.first;w=x.second};100->{if(wire!=0)return null;val x=rv(d,p)?:return null;p=x.n;st=x.v};else->p=skip(d,p,wire)?:return null}};return Parsed(t,st,s,w==null?null:s,w)}
- private fun auth(d:ByteArray):Pair<Int,Watch?>{var p=0;var status=0;var w:Watch?=null;while(p<d.size){val a=rv(d,p)?:break;p=a.n;val f=a.v ushr 3;val wire=a.v and 7;when{f==1&&wire==0->{val x=rv(d,p)?:break;p=x.n;status=x.v};f==31&&wire==2->{val b=rb(d,p)?:break;p=b.n;w=watch(b.b)};f==37&&wire==2->{val b=rb(d,p)?:break;p=b.n;val x=rv(b.b,0);if(x!=null&&x.v ushr 3==1)status=rv(b.b,x.n)?.v ?:status};else->{p=skip(d,p,wire)?:break}}};return status to w}
- private fun watch(d:ByteArray):Watch{var p=0;var n=ByteArray(0);var h=ByteArray(0);while(p<d.size){val a=rv(d,p)?:break;p=a.n;val f=a.v ushr 3;val wire=a.v and 7;if(wire!=2){p=skip(d,p,wire)?:break;continue};val b=rb(d,p)?:break;p=b.n;if(f==1)n=b.b else if(f==2)h=b.b};return Watch(n,h)}
- private fun cmd(st:Int,a:ByteArray)=varint(1,1)+varint(2,st)+a
- private fun bytes(n:Int,b:ByteArray)=varintTag(n,2)+varintValue(b.size)+b
- private fun str(n:Int,s:String)=bytes(n,s.toByteArray())
- private fun fixed(n:Int,b:ByteArray)=varintTag(n,5)+b
- private fun varint(n:Int,v:Int)=varintTag(n,0)+varintValue(v)
- private fun varintTag(n:Int,w:Int)=varintValue((n shl 3) or w)
- private fun varintValue(v0:Int):ByteArray{var v=v0;val o=ArrayList<Byte>();do{var b=v and 127;v=v ushr 7;if(v!=0)b=b or 128;o.add(b.toByte())}while(v!=0);return o.toByteArray()}
- private data class R(val v:Int,val n:Int);private data class B(val b:ByteArray,val n:Int)
- private fun rv(d:ByteArray,s:Int):R?{var p=s;var v=0;var sh=0;while(p<d.size&&sh<32){val b=d[p++].toInt() and 255;v=v or((b and 127) shl sh);if((b and 128)==0)return R(v,p);sh+=7};return null}
- private fun rb(d:ByteArray,s:Int):B?{val l=rv(d,s)?:return null;if(l.n+l.v>d.size)return null;return B(d.copyOfRange(l.n,l.n+l.v),l.n+l.v)}
- private fun skip(d:ByteArray,s:Int,w:Int):Int?=when(w){0->rv(d,s)?.n;1->if(s+8<=d.size)s+8 else null;2->rb(d,s)?.n;5->if(s+4<=d.size)s+4 else null;else->null}
+private object XiaomiAuthProto {
+    data class WatchNonce(val nonce: ByteArray, val hmac: ByteArray)
+    data class ParsedCommand(val type: Int, val subtype: Int, val status: Int, val authStatus: Int, val watch: WatchNonce?)
+
+    fun commandNonce(nonce: ByteArray): ByteArray =
+        command(26, fieldBytes(3, fieldBytes(30, fieldBytes(1, nonce))))
+
+    fun commandAuth(encryptedNonces: ByteArray, encryptedDeviceInfo: ByteArray): ByteArray =
+        command(27, fieldBytes(3, fieldBytes(32, fieldBytes(1, encryptedNonces) + fieldBytes(2, encryptedDeviceInfo))))
+
+    fun authDeviceInfo(api: Int, model: String, language: String): ByteArray {
+        val fixedApi = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putFloat(api.toFloat()).array()
+        val region = language.take(2).uppercase(java.util.Locale.ROOT)
+        return fieldVarint(1, 0) + fieldFixed32(2, fixedApi) + fieldString(3, model) + fieldVarint(4, 224) + fieldString(5, region)
+    }
+
+    fun parseCommand(data: ByteArray): ParsedCommand? {
+        var position = 0
+        var type = 0
+        var subtype = 0
+        var status = 0
+        var authStatus = 0
+        var watch: WatchNonce? = null
+        while (position < data.size) {
+            val tag = readVarint(data, position) ?: return null
+            position = tag.next
+            val field = tag.value ushr 3
+            val wire = tag.value and 7
+            when (field) {
+                1, 2 -> {
+                    if (wire != 0) return null
+                    val value = readVarint(data, position) ?: return null
+                    position = value.next
+                    if (field == 1) type = value.value else subtype = value.value
+                }
+                3 -> {
+                    if (wire != 2) return null
+                    val nested = readBytes(data, position) ?: return null
+                    position = nested.next
+                    val auth = parseAuth(nested.bytes)
+                    authStatus = auth.status
+                    watch = auth.watch
+                }
+                else -> position = skipField(data, position, wire) ?: return null
+            }
+        }
+        return ParsedCommand(type, subtype, status, authStatus, watch)
+    }
+
+    private data class AuthParsed(val status: Int, val watch: WatchNonce?)
+
+    private fun parseAuth(data: ByteArray): AuthParsed {
+        var position = 0
+        var status = 0
+        var watch: WatchNonce? = null
+        while (position < data.size) {
+            val tag = readVarint(data, position) ?: break
+            position = tag.next
+            val field = tag.value ushr 3
+            val wire = tag.value and 7
+            when {
+                field == 1 && wire == 0 -> {
+                    val value = readVarint(data, position) ?: break
+                    position = value.next
+                    status = value.value
+                }
+                field == 31 && wire == 2 -> {
+                    val nested = readBytes(data, position) ?: break
+                    position = nested.next
+                    watch = parseWatchNonce(nested.bytes)
+                }
+                field == 37 && wire == 2 -> {
+                    val nested = readBytes(data, position) ?: break
+                    position = nested.next
+                    val nestedTag = readVarint(nested.bytes, 0)
+                    if (nestedTag != null && (nestedTag.value ushr 3) == 1 && (nestedTag.value and 7) == 0) {
+                        val nestedValue = readVarint(nested.bytes, nestedTag.next)
+                        if (nestedValue != null) status = nestedValue.value
+                    }
+                }
+                else -> position = skipField(data, position, wire) ?: break
+            }
+        }
+        return AuthParsed(status, watch)
+    }
+
+    private fun parseWatchNonce(data: ByteArray): WatchNonce {
+        var position = 0
+        var nonce = ByteArray(0)
+        var hmac = ByteArray(0)
+        while (position < data.size) {
+            val tag = readVarint(data, position) ?: break
+            position = tag.next
+            val field = tag.value ushr 3
+            val wire = tag.value and 7
+            if (wire != 2) {
+                position = skipField(data, position, wire) ?: break
+                continue
+            }
+            val bytes = readBytes(data, position) ?: break
+            position = bytes.next
+            when (field) {
+                1 -> nonce = bytes.bytes
+                2 -> hmac = bytes.bytes
+            }
+        }
+        return WatchNonce(nonce, hmac)
+    }
+
+    private fun command(subtype: Int, auth: ByteArray): ByteArray = fieldVarint(1, 1) + fieldVarint(2, subtype) + auth
+    private fun fieldBytes(number: Int, value: ByteArray): ByteArray = varintTag(number, 2) + varintValue(value.size) + value
+    private fun fieldString(number: Int, value: String): ByteArray = fieldBytes(number, value.toByteArray(Charsets.UTF_8))
+    private fun fieldVarint(number: Int, value: Int): ByteArray = varintTag(number, 0) + varintValue(value)
+    private fun fieldFixed32(number: Int, value: ByteArray): ByteArray = varintTag(number, 5) + value
+    private fun varintTag(number: Int, wireType: Int): ByteArray = varintValue((number shl 3) or wireType)
+    private fun varintValue(input: Int): ByteArray {
+        var value = input
+        val out = ArrayList<Byte>()
+        do {
+            var b = value and 0x7F
+            value = value ushr 7
+            if (value != 0) b = b or 0x80
+            out.add(b.toByte())
+        } while (value != 0)
+        return out.toByteArray()
+    }
+    private data class ReadVarint(val value: Int, val next: Int)
+    private data class ReadBytes(val bytes: ByteArray, val next: Int)
+    private fun readVarint(data: ByteArray, start: Int): ReadVarint? {
+        var position = start
+        var value = 0
+        var shift = 0
+        while (position < data.size && shift < 32) {
+            val b = data[position++].toInt() and 0xFF
+            value = value or ((b and 0x7F) shl shift)
+            if ((b and 0x80) == 0) return ReadVarint(value, position)
+            shift += 7
+        }
+        return null
+    }
+    private fun readBytes(data: ByteArray, start: Int): ReadBytes? {
+        val length = readVarint(data, start) ?: return null
+        if (length.value < 0 || length.next + length.value > data.size) return null
+        return ReadBytes(data.copyOfRange(length.next, length.next + length.value), length.next + length.value)
+    }
+    private fun skipField(data: ByteArray, start: Int, wireType: Int): Int? = when (wireType) {
+        0 -> readVarint(data, start)?.next
+        1 -> if (start + 8 <= data.size) start + 8 else null
+        2 -> readBytes(data, start)?.next
+        5 -> if (start + 4 <= data.size) start + 4 else null
+        else -> null
+    }
 }
