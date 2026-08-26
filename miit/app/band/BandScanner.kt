@@ -40,7 +40,6 @@ class BandScanner(context: Context) {
     private val bluetoothManager = appContext.getSystemService(BluetoothManager::class.java)
     private val adapter: BluetoothAdapter? get() = bluetoothManager?.adapter
     private val scanner: BluetoothLeScanner? get() = adapter?.bluetoothLeScanner
-
     private val _devices = MutableStateFlow<List<BandDevice>>(emptyList())
     val devices: StateFlow<List<BandDevice>> = _devices.asStateFlow()
     private val _state = MutableStateFlow(BandConnectionState.Idle)
@@ -50,7 +49,7 @@ class BandScanner(context: Context) {
     private var pendingBondDevice: BandDevice? = null
     private var activeAddress: String? = null
     private var activeAuthKey: ByteArray? = null
-    private var spp: XiaomiBandConnection? = null
+    private var spp: XiaomiSppConnection? = null
 
     private val bondReceiver = object : BroadcastReceiver() {
         @SuppressLint("MissingPermission")
@@ -121,8 +120,7 @@ class BandScanner(context: Context) {
         bleScanner.startScan(scanCallback)
     }
 
-    private fun isLikelyXiaomiBand(name: String) =
-        name.contains("Band", true) || name.contains("Xiaomi", true) || name.contains("Mi Smart", true)
+    private fun isLikelyXiaomiBand(name: String) = name.contains("Band", true) || name.contains("Xiaomi", true) || name.contains("Mi Smart", true)
 
     @SuppressLint("MissingPermission")
     fun stopScan() {
@@ -164,11 +162,8 @@ class BandScanner(context: Context) {
     private fun startCompanionPairing(device: BluetoothDevice) {
         val manager = appContext.getSystemService(Context.COMPANION_DEVICE_SERVICE) as? CompanionDeviceManager
         if (manager == null) { startDirectBond(device); return }
-        val filter = if (device.type == BluetoothDevice.DEVICE_TYPE_CLASSIC) {
-            BluetoothDeviceFilter.Builder().setAddress(device.address).build()
-        } else {
-            BluetoothLeDeviceFilter.Builder().setScanFilter(ScanFilter.Builder().setDeviceAddress(device.address).build()).build()
-        }
+        val filter = if (device.type == BluetoothDevice.DEVICE_TYPE_CLASSIC) BluetoothDeviceFilter.Builder().setAddress(device.address).build()
+        else BluetoothLeDeviceFilter.Builder().setScanFilter(ScanFilter.Builder().setDeviceAddress(device.address).build()).build()
         val request = AssociationRequest.Builder().addDeviceFilter(filter).setSingleDevice(true).build()
         MiitTestLog.add("Xiaomi pairing: requesting Android Companion confirmation")
         runCatching {
@@ -223,27 +218,21 @@ class BandScanner(context: Context) {
     @SuppressLint("MissingPermission")
     private fun startSpp(device: BandDevice) {
         val key = activeAuthKey ?: run { _state.value = BandConnectionState.Error; MiitTestLog.add("Xiaomi SPP: missing auth key"); return }
-        spp?.close()
-        _state.value = BandConnectionState.Connecting
+        spp?.close(); _state.value = BandConnectionState.Connecting
         val remote = adapter?.getRemoteDevice(device.address) ?: run { _state.value = BandConnectionState.Error; return }
         if (remote.bondState != BluetoothDevice.BOND_BONDED) { pendingBondDevice = device; return }
-
-        spp = XiaomiBandConnection(
+        spp = XiaomiSppConnection(
             device = remote,
             authKey = key.copyOf(),
             onEvent = { MiitTestLog.add(it) },
             onState = { newState ->
                 _state.value = newState
                 when (newState) {
-                    BandConnectionState.Authenticated -> updateConnected(device.address, connected = true, authenticated = true)
-                    BandConnectionState.Error, BandConnectionState.Disconnected -> {
-                        updateConnected(device.address, connected = false, authenticated = false)
-                        activeAddress = null; activeAuthKey = null
-                    }
+                    BandConnectionState.Authenticated -> updateConnected(device.address, true, true)
+                    BandConnectionState.Error, BandConnectionState.Disconnected -> { updateConnected(device.address, false, false); activeAddress = null; activeAuthKey = null }
                     else -> Unit
                 }
-            },
-            onDataUpdate = { updateDeviceData(device.address, it) }
+            }
         )
         MiitTestLog.add("Starting Xiaomi RFCOMM/SPP transport after Android bond")
         spp?.connect()
@@ -253,28 +242,10 @@ class BandScanner(context: Context) {
         _devices.value = _devices.value.map { if (it.address.equals(address, true)) it.copy(connected = connected, authenticated = authenticated) else it }
     }
 
-    private fun updateDeviceData(address: String, update: BandDataUpdate) {
-        _devices.value = _devices.value.map {
-            if (!it.address.equals(address, true)) return@map it
-            it.copy(
-                batteryPercentage = update.batteryPercentage ?: it.batteryPercentage,
-                firmware = update.firmware ?: it.firmware,
-                model = update.model ?: it.model,
-                displays = update.displays ?: it.displays
-            )
-        }
-    }
-
-    private fun bondName(state: Int) = when (state) {
-        BluetoothDevice.BOND_NONE -> "NONE"
-        BluetoothDevice.BOND_BONDING -> "BONDING"
-        BluetoothDevice.BOND_BONDED -> "BONDED"
-        else -> "UNKNOWN"
-    }
+    private fun bondName(state: Int) = when (state) { BluetoothDevice.BOND_NONE -> "NONE"; BluetoothDevice.BOND_BONDING -> "BONDING"; BluetoothDevice.BOND_BONDED -> "BONDED"; else -> "UNKNOWN" }
 
     fun close() {
-        stopScan(); runCatching { appContext.unregisterReceiver(bondReceiver) }
-        spp?.close(); spp = null
+        stopScan(); runCatching { appContext.unregisterReceiver(bondReceiver) }; spp?.close(); spp = null
         if (activeScanner === this) activeScanner = null
         activeAddress = null; activeAuthKey = null; pendingBondDevice = null
     }
