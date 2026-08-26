@@ -135,6 +135,17 @@ private fun HomeScreen(onEditor: () -> Unit) {
                             Button(onClick = { MiitTestLog.add("User tapped Stop scan"); scanner.stopScan() }) { Text("Stop") }
                         }
                     }
+                    if (devices.any { it.authenticated }) {
+                        val connected = devices.first { it.authenticated }
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("Band connection", style = MaterialTheme.typography.titleMedium)
+                                Text("✓ ${connected.name}")
+                                Text("Authenticated over Xiaomi SPPv2")
+                                Text("The Bluetooth/SPP connection is active. Device-data initialization can now run.")
+                            }
+                        }
+                    }
                     Button(
                         onClick = {
                             val log = MiitTestLog.text(context)
@@ -177,15 +188,25 @@ private fun HomeScreen(onEditor: () -> Unit) {
 @Composable
 private fun BandDeviceCard(device: BandDevice, onConnect: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(device.name, style = MaterialTheme.typography.titleMedium)
+            if (device.authenticated) {
+                Text("✓ Connected & authenticated", style = MaterialTheme.typography.titleMedium)
+                Text("Xiaomi SPPv2 session is active. Miit is ready for device initialization/data.")
+            } else if (device.connected) {
+                Text("Connected — authentication in progress")
+            } else {
+                Text("Not connected")
+            }
             Text("Signal: ${device.rssi} dBm")
             Text("Address: ${device.address}")
             device.model?.let { Text("Model: $it") }
             device.firmware?.let { Text("Firmware: $it") }
             device.manufacturer?.let { Text("Manufacturer: $it") }
             Spacer(Modifier.height(6.dp))
-            Button(onClick = onConnect) { Text("Connect") }
+            Button(onClick = onConnect, enabled = !device.connected && !device.authenticated) {
+                Text(if (device.authenticated) "Connected" else "Connect")
+            }
         }
     }
 }
@@ -197,7 +218,7 @@ private fun connectionMessage(state: BandConnectionState): String = when (state)
     BandConnectionState.Connected -> "Xiaomi transport connected; waiting for authentication."
     BandConnectionState.AwaitingXiaomiBinding -> "Android pairing is complete. Enter the Xiaomi auth key to continue binding."
     BandConnectionState.Authenticating -> "Authenticating with the band…"
-    BandConnectionState.Authenticated -> "Authenticated and ready."
+    BandConnectionState.Authenticated -> "Connected and authenticated. Xiaomi SPPv2 is active."
     BandConnectionState.Disconnected -> "Band disconnected."
     BandConnectionState.Error -> "Bluetooth/authentication failed. Check the key and try again."
 }
