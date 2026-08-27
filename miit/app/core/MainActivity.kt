@@ -9,7 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
+import androidx.activity.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -51,6 +51,7 @@ import androidx.compose.ui.zIndex
 import com.miit.app.band.AuthKeyParser
 import com.miit.app.band.BandConnectionState
 import com.miit.app.band.BandDevice
+import com.miit.app.band.BandDisplay
 import com.miit.app.band.BandScanner
 import com.miit.app.band.MiitTestLog
 import kotlin.math.roundToInt
@@ -253,8 +254,17 @@ private fun ConnectionScreen(
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(device.name, style = MaterialTheme.typography.titleMedium)
-                            Text(if (device.authenticated) "✓ Connected" else "Available")
+                            Text(
+                                when {
+                                    device.authenticated -> "✓ Connected and authenticated"
+                                    device.connected -> "Connected"
+                                    else -> "Available"
+                                }
+                            )
                             Text("Signal: ${device.rssi} dBm")
+                            if (device.model != null || device.firmware != null) {
+                                Text("${device.model ?: "Unknown model"} • ${device.firmware ?: "Firmware unavailable"}")
+                            }
                             Button(
                                 onClick = {
                                     val key = AuthKeyParser.parse(authKeyText)
@@ -283,8 +293,6 @@ private fun BandScreen(
     onEdit: (String) -> Unit,
     onCustomDisplay: () -> Unit
 ) {
-    val displays = listOf("Current display", "Minimal digital", "Classic dashboard")
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -295,43 +303,99 @@ private fun BandScreen(
             )
         }
     ) { padding ->
-        Column(
+        LazyColumn(
             Modifier.fillMaxSize().padding(padding).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Card(Modifier.fillMaxWidth()) {
-                Row(
-                    Modifier.fillMaxWidth().padding(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text("🔋 ${band.batteryPercentage?.let { "$it%" } ?: "—"}")
-                    Text("ⓘ ${band.firmware ?: "—"}")
-                    Text("🌐 ${band.countryVariant ?: "—"}")
-                    Text("▣ ${band.model ?: "—"}")
-                }
-            }
-
-            Text("Band displays", style = MaterialTheme.typography.titleLarge)
-            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(displays) { display ->
-                    Card(Modifier.fillMaxWidth()) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(Modifier.padding(top = 4.dp)) {
-                                Text(display, style = MaterialTheme.typography.titleMedium)
-                                Text("Watch display")
-                            }
-                            Button(onClick = { onEdit(display) }) { Text("Edit") }
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Live band data", style = MaterialTheme.typography.titleLarge)
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Text("🔋 ${band.batteryPercentage?.let { "$it%" } ?: "—"}")
+                            Text("ⓘ ${band.firmware ?: "—"}")
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Text("🌐 ${band.countryVariant ?: "—"}")
+                            Text("▣ ${band.model ?: "—"}")
                         }
                     }
                 }
             }
 
-            Button(onClick = onCustomDisplay, Modifier.fillMaxWidth()) {
-                Text("＋ Custom display")
+            item {
+                Text("Detected band displays", style = MaterialTheme.typography.titleLarge)
             }
+
+            if (band.displays.isEmpty()) {
+                item {
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("No runtime display items received yet.", style = MaterialTheme.typography.titleMedium)
+                            Text("The editor remains available while the Xiaomi initialization layer is being expanded.")
+                        }
+                    }
+                }
+            } else {
+                items(
+                    band.displays,
+                    key = { display -> "${display.code ?: "display"}:${display.name ?: "unnamed"}" }
+                ) { display ->
+                    RuntimeDisplayCard(display = display, onEdit = onEdit)
+                }
+            }
+
+            item {
+                Text("Editor displays", style = MaterialTheme.typography.titleLarge)
+            }
+            items(listOf("Current display", "Minimal digital", "Classic dashboard")) { display ->
+                Card(Modifier.fillMaxWidth()) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(Modifier.padding(top = 4.dp)) {
+                            Text(display, style = MaterialTheme.typography.titleMedium)
+                            Text("Local editor template")
+                        }
+                        Button(onClick = { onEdit(display) }) { Text("Edit") }
+                    }
+                }
+            }
+
+            item {
+                Button(onClick = onCustomDisplay, Modifier.fillMaxWidth()) {
+                    Text("＋ Custom display")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RuntimeDisplayCard(display: BandDisplay, onEdit: (String) -> Unit) {
+    val name = display.name ?: display.code ?: "Unnamed display"
+    val code = display.code ?: "no code"
+    Card(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(name, style = MaterialTheme.typography.titleMedium)
+                Text("Code: $code")
+                Text(
+                    when {
+                        display.disabled -> "Disabled on band"
+                        display.inMoreSection -> "More section"
+                        else -> "Available"
+                    }
+                )
+            }
+            Button(
+                onClick = { onEdit(name) },
+                enabled = !display.disabled
+            ) { Text("Edit") }
         }
     }
 }
@@ -466,7 +530,7 @@ private fun connectionInstruction(state: BandConnectionState): String = when (st
     BandConnectionState.Connected -> "The Bluetooth transport is connected. Authentication is continuing."
     BandConnectionState.AwaitingXiaomiBinding -> "Android pairing is complete. Xiaomi binding is continuing."
     BandConnectionState.Authenticating -> "Authenticating with the band… please wait."
-    BandConnectionState.Authenticated -> "Connection complete."
+    BandConnectionState.Authenticated -> "Connection complete. Runtime band data will appear as it arrives."
     BandConnectionState.Disconnected -> "The band disconnected. Scan and connect again."
     BandConnectionState.Error -> "Connection failed. Check the auth key and try again."
 }
