@@ -26,6 +26,18 @@ android {
 
 kotlin { jvmToolchain(17) }
 
+// AGP 8.7 + Gradle task validation can report implicit dependencies from
+// dependency-processing tasks into Kotlin compilation. Make those ordering
+// requirements explicit for every Android variant instead of relying on
+// Gradle's inferred task graph.
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
+tasks.withType<KotlinCompile>().configureEach {
+    dependsOn(tasks.matching { it.name.startsWith("check") && it.name.endsWith("DuplicateClasses") })
+    dependsOn(tasks.matching { it.name.startsWith("desugar") && it.name.endsWith("FileDependencies") })
+    dependsOn(tasks.matching { it.name.startsWith("merge") && it.name.endsWith("JniLibFolders") })
+}
+
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.activity:activity-compose:1.10.0")
