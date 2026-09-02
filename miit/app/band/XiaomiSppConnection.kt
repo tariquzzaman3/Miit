@@ -11,6 +11,9 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.SecureRandom
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import javax.crypto.Cipher
 import javax.crypto.Mac
@@ -57,6 +60,9 @@ class XiaomiSppConnection(
     private val writeLock = Any()
     private val txSequence = AtomicInteger(0)
     private val rxBuffer = ByteArrayOutputStream()
+    private val requestExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "Miit-Xiaomi-Requests").apply { isDaemon = true }
+    }
     private var parserVersion = 1
     private var auth: XiaomiSppAuthenticator? = null
 
@@ -258,6 +264,12 @@ class XiaomiSppConnection(
             return
         }
         onEvent("Xiaomi command: type=${parsed.type} subtype=${parsed.subtype}")
+        if (parsed.type == XiaomiCommandParser.TYPE_WATCHFACE) {
+            onEvent("Xiaomi inventory: received watchface metadata count=${parsed.watchfaces.size}")
+        }
+        if (parsed.type == XiaomiCommandParser.TYPE_SYSTEM && parsed.screenItems.isNotEmpty()) {
+            onEvent("Xiaomi inventory: received band screen items count=${parsed.screenItems.size}")
+        }
         if (parsed.battery != null || parsed.batteryState != null || parsed.charging != null ||
             parsed.firmware != null || parsed.model != null || parsed.hardware != null ||
             parsed.serialNumber != null
@@ -295,16 +307,38 @@ class XiaomiSppConnection(
     }
 
     private fun requestInitialRuntimeData() {
+        // Match Gadgetbridge's initialization order, but space the writes so the band
+        // can answer each encrypted request while RFCOMM remains responsive.
         val requests = listOf(
             "device info" to XiaomiCommandParser.systemGet(XiaomiCommandParser.SYSTEM_DEVICE_INFO),
             "device state" to XiaomiCommandParser.systemGet(XiaomiCommandParser.SYSTEM_DEVICE_STATE_GET),
             "battery" to XiaomiCommandParser.systemGet(XiaomiCommandParser.SYSTEM_BATTERY),
+            "password" to XiaomiCommandParser.systemGet(9),
             "display items" to XiaomiCommandParser.systemGet(XiaomiCommandParser.SYSTEM_DISPLAY_ITEMS_GET),
+            "camera remote" to XiaomiCommandParser.systemGet(7),
             "widgets" to XiaomiCommandParser.systemGet(XiaomiCommandParser.SYSTEM_WIDGET_SCREENS_GET),
             "widget parts" to XiaomiCommandParser.systemGet(XiaomiCommandParser.SYSTEM_WIDGET_PARTS_GET),
-            "watchface list" to XiaomiCommandParser.watchfaceListGet()
+            "workout types" to XiaomiCommandParser.systemGet(39)
         )
-        requests.forEach { (name, payload) -> sendProtoCommand(name, payload) }
+        requests.forEachIndexed { index, pair ->
+            requestExecutor.schedule({
+                if (running && authenticated) sendProtoCommand(pair.first, pair.second)
+            }, index * 140L, TimeUnit.MILLISECONDS)
+        }
+        // Watchface inventory is requested after the core system initialization, as in
+        // Gadgetbridge's app-info flow. A retry handles bands that answer late.
+        requestExecutor.schedule({
+            if (running && authenticated) {
+                sendProtoCommand("watchface list", XiaomiCommandParser.watchfaceListGet())
+                onEvent("Xiaomi inventory: watchface list requested")
+            }
+        }, 1600L, TimeUnit.MILLISECONDS)
+        requestExecutor.schedule({
+            if (running && authenticated) {
+                sendProtoCommand("watchface list retry", XiaomiCommandParser.watchfaceListGet())
+                onEvent("Xiaomi inventory: watchface list retry requested")
+            }
+        }, 4000L, TimeUnit.MILLISECONDS)
     }
 
     fun sendProtoCommand(name: String, payload: ByteArray): Boolean {
