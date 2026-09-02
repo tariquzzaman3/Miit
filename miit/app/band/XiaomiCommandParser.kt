@@ -1,18 +1,38 @@
 package com.miit.app.band
 
 /**
- * Minimal proto2 decoder for the Xiaomi Command/System messages used after SPPv2
- * authentication. This intentionally extracts only fields needed by Miit and
- * ignores unknown protobuf fields so firmware differences do not break parsing.
+ * Small protobuf reader for the Xiaomi command messages used after SPPv2
+ * authentication. Unknown fields are skipped so newer firmware can still
+ * be read without breaking the connection.
+ *
+ * Command ids mirror Gadgetbridge's XiaomiSystemService and
+ * XiaomiWatchfaceService:
+ * system=2, watchface=4.
  */
 object XiaomiCommandParser {
+    const val TYPE_SYSTEM = 2
+    const val TYPE_WATCHFACE = 4
+
+    const val SYSTEM_BATTERY = 1
+    const val SYSTEM_DEVICE_INFO = 2
+    const val SYSTEM_DISPLAY_ITEMS_GET = 29
+    const val SYSTEM_WIDGET_SCREENS_GET = 51
+    const val SYSTEM_WIDGET_PARTS_GET = 53
+    const val SYSTEM_DEVICE_STATE_GET = 78
+    const val SYSTEM_DEVICE_STATE = 79
+
+    const val WATCHFACE_LIST = 0
+
     data class Parsed(
         val type: Int,
         val subtype: Int,
         val battery: Int? = null,
         val batteryState: Int? = null,
+        val charging: Boolean? = null,
         val firmware: String? = null,
         val model: String? = null,
+        val hardware: String? = null,
+        val serialNumber: String? = null,
         val displays: List<BandDisplay> = emptyList()
     )
 
@@ -21,6 +41,7 @@ object XiaomiCommandParser {
         var type: Int? = null
         var subtype = 0
         var system: ByteArray? = null
+        var watchface: ByteArray? = null
 
         while (root.hasRemaining()) {
             val field = root.nextField() ?: break
@@ -28,28 +49,41 @@ object XiaomiCommandParser {
                 1 -> type = field.varint?.toInt()
                 2 -> subtype = field.varint?.toInt() ?: 0
                 4 -> system = field.bytes
+                5 -> watchface = field.bytes
             }
         }
+
         if (type == null) return null
-        if (type != 2 || system == null) return Parsed(type, subtype)
+
+        return when (type) {
+            TYPE_SYSTEM -> parseSystem(type, subtype, system)
+            TYPE_WATCHFACE -> parseWatchface(type, subtype, watchface)
+            else -> Parsed(type, subtype)
+        }
+    }
+
+    private fun parseSystem(type: Int, subtype: Int, system: ByteArray?): Parsed {
+        if (system == null) return Parsed(type, subtype)
 
         var battery: Int? = null
         var batteryState: Int? = null
+        var charging: Boolean? = null
         var firmware: String? = null
         var model: String? = null
+        var hardware: String? = null
+        var serialNumber: String? = null
         var displays: List<BandDisplay> = emptyList()
 
         val sr = ProtoReader(system)
         while (sr.hasRemaining()) {
             val sf = sr.nextField() ?: break
             when (sf.number) {
-                // System.power = field 2
+                // System.power
                 2 -> {
                     val power = sf.bytes ?: continue
                     val br = ProtoReader(power)
                     while (br.hasRemaining()) {
                         val bf = br.nextField() ?: break
-                        // Power.battery = field 1
                         if (bf.number == 1 && bf.bytes != null) {
                             val b = ProtoReader(bf.bytes)
                             while (b.hasRemaining()) {
@@ -61,41 +95,74 @@ object XiaomiCommandParser {
                             }
                         }
                     }
+                    charging = batteryState == 1
                 }
-                // System.deviceInfo = field 3
+
+                // System.deviceInfo
                 3 -> {
                     val info = sf.bytes ?: continue
                     val ir = ProtoReader(info)
                     while (ir.hasRemaining()) {
                         val f = ir.nextField() ?: break
                         when (f.number) {
-                            2 -> firmware = f.stringValue()
+                            1 -> firmware = f.stringValue()
+                            2 -> firmware = firmware ?: f.stringValue()
+                            3 -> serialNumber = f.stringValue()
                             4 -> model = f.stringValue()
+                            5 -> hardware = f.stringValue()
                         }
                     }
                 }
-                // System.displayItems = field 10
+
+                // System.displayItems. Gadgetbridge models this as a repeated
+                // DisplayItem nested under the displayItems message.
                 10 -> {
                     val list = sf.bytes ?: continue
-                    val dr = ProtoReader(list)
-                    val parsedDisplays = mutableListOf<BandDisplay>()
-                    while (dr.hasRemaining()) {
-                        val f = dr.nextField() ?: break
-                        if (f.number == 1 && f.bytes != null) {
-                            parsedDisplays += parseDisplayItem(f.bytes)
-                        }
-                    }
-                    displays = parsedDisplays
+                    displays = parseDisplayItems(list)
+                }
+
+                // Some firmware exposes display items under a different
+                // nested tag. Try it without making it mandatory.
+                11 -> {
+                    val list = sf.bytes ?: continue
+                    if (displays.isEmpty()) displays = parseDisplayItems(list)
                 }
             }
         }
 
-        return Parsed(type, subtype, battery, batteryState, firmware, model, displays)
+        return Parsed(
+            type = type,
+            subtype = subtype,
+            battery = battery,
+            batteryState = batteryState,
+            charging = charging,
+            firmware = firmware,
+            model = model,
+            hardware = hardware,
+            serialNumber = serialNumber,
+            displays = displays
+        )
     }
 
-    /** Proto2 request: Command(type=2, subtype=<>, system=<empty nested request>). */
-    fun systemGet(subtype: Int): ByteArray =
-        fieldVarint(1, 2) + fieldVarint(2, subtype) + fieldBytes(4, ByteArray(0))
+    private fun parseDisplayItems(data: ByteArray): List<BandDisplay> {
+        val result = mutableListOf<BandDisplay>()
+        val r = ProtoReader(data)
+        while (r.hasRemaining()) {
+            val f = r.nextField() ?: break
+            if (f.bytes != null) {
+                val candidate = parseDisplayItem(f.bytes)
+                if (candidate.code != null || candidate.name != null) result += candidate
+            }
+        }
+
+        // A single DisplayItem may also arrive directly rather than wrapped
+        // in a repeated field.
+        if (result.isEmpty()) {
+            val candidate = parseDisplayItem(data)
+            if (candidate.code != null || candidate.name != null) result += candidate
+        }
+        return result.distinctBy { (it.code ?: "") + "\u0000" + (it.name ?: "") }
+    }
 
     private fun parseDisplayItem(data: ByteArray): BandDisplay {
         var code: String? = null
@@ -106,14 +173,59 @@ object XiaomiCommandParser {
         while (r.hasRemaining()) {
             val f = r.nextField() ?: break
             when (f.number) {
-                1 -> code = f.stringValue()
-                2 -> name = f.stringValue()
+                1 -> code = f.stringValue() ?: f.varint?.toString()
+                2 -> name = f.stringValue() ?: f.varint?.toString()
                 3 -> disabled = (f.varint ?: 0L) != 0L
                 6 -> inMore = (f.varint ?: 0L) != 0L
             }
         }
-        return BandDisplay(code = code, name = name, disabled = disabled, inMoreSection = inMore)
+        return BandDisplay(code, name, disabled, inMore)
     }
+
+    private fun parseWatchface(type: Int, subtype: Int, watchface: ByteArray?): Parsed {
+        if (watchface == null) return Parsed(type, subtype)
+        if (subtype != WATCHFACE_LIST) return Parsed(type, subtype)
+
+        val list = mutableListOf<BandDisplay>()
+        val wr = ProtoReader(watchface)
+        while (wr.hasRemaining()) {
+            val f = wr.nextField() ?: break
+            if (f.number == 1 && f.bytes != null) {
+                val info = ProtoReader(f.bytes)
+                var id: String? = null
+                var name: String? = null
+                var active = false
+                var canDelete = false
+                while (info.hasRemaining()) {
+                    val wf = info.nextField() ?: break
+                    when (wf.number) {
+                        1 -> id = wf.stringValue()
+                        2 -> name = wf.stringValue()
+                        3 -> active = (wf.varint ?: 0L) != 0L
+                        4 -> canDelete = (wf.varint ?: 0L) != 0L
+                    }
+                }
+                if (id != null || name != null) {
+                    list += BandDisplay(
+                        code = id,
+                        name = name,
+                        disabled = false,
+                        inMoreSection = canDelete
+                    )
+                }
+            }
+        }
+        return Parsed(type, subtype, displays = list)
+    }
+
+    fun systemGet(subtype: Int): ByteArray =
+        command(TYPE_SYSTEM, subtype)
+
+    fun watchfaceListGet(): ByteArray =
+        command(TYPE_WATCHFACE, WATCHFACE_LIST)
+
+    fun command(type: Int, subtype: Int): ByteArray =
+        fieldVarint(1, type) + fieldVarint(2, subtype)
 
     private fun fieldBytes(number: Int, bytes: ByteArray): ByteArray =
         varint((number shl 3) or 2) + varint(bytes.size) + bytes
@@ -139,7 +251,7 @@ object XiaomiCommandParser {
         val varint: Long? = null,
         val bytes: ByteArray? = null
     ) {
-        fun stringValue(): String? = bytes?.toString(Charsets.UTF_8)
+        fun stringValue(): String? = bytes?.toString(Charsets.UTF_8)?.takeIf { it.isNotEmpty() }
     }
 
     private class ProtoReader(private val data: ByteArray) {
