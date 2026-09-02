@@ -49,7 +49,7 @@ object XiaomiCommandParser {
                 1 -> type = field.varint?.toInt()
                 2 -> subtype = field.varint?.toInt() ?: 0
                 4 -> system = field.bytes
-                5 -> watchface = field.bytes
+                6 -> watchface = field.bytes
             }
         }
 
