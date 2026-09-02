@@ -309,22 +309,30 @@ private fun BandScreen(
         ) {
             item {
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Live band data", style = MaterialTheme.typography.titleLarge)
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Text("🔋 ${band.batteryPercentage?.let { "$it%" } ?: "—"}")
-                            Text("ⓘ ${band.firmware ?: "—"}")
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(band.name, style = MaterialTheme.typography.titleLarge)
+
+                        val info = buildList {
+                            band.batteryPercentage?.let { add("🔋 ${it}%") }
+                            band.charging?.let { if (it) add("⚡") }
+                            band.model?.let { add("▣ $it") }
+                            band.hardware?.let { add("⌁ $it") }
+                            band.firmware?.let { add("ⓘ $it") }
+                            band.countryVariant?.let { add("🌐 $it") }
+                            band.heartRate?.let { add("♥ $it") }
+                            band.serialNumber?.let { add("SN $it") }
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Text("🌐 ${band.countryVariant ?: "—"}")
-                            Text("▣ ${band.model ?: "—"}")
+
+                        if (info.isNotEmpty()) {
+                            Text(info.joinToString("  •  "))
                         }
                     }
                 }
             }
 
             item {
-                Text("Detected band displays", style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(8.dp))
+                Text("Band displays", style = MaterialTheme.typography.titleLarge)
             }
 
             if (band.displays.isEmpty()) {
@@ -342,24 +350,6 @@ private fun BandScreen(
                     key = { display -> "${display.code ?: "display"}:${display.name ?: "unnamed"}" }
                 ) { display ->
                     RuntimeDisplayCard(display = display, onEdit = onEdit)
-                }
-            }
-
-            item {
-                Text("Editor displays", style = MaterialTheme.typography.titleLarge)
-            }
-            items(listOf("Current display", "Minimal digital", "Classic dashboard")) { display ->
-                Card(Modifier.fillMaxWidth()) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(Modifier.padding(top = 4.dp)) {
-                            Text(display, style = MaterialTheme.typography.titleMedium)
-                            Text("Local editor template")
-                        }
-                        Button(onClick = { onEdit(display) }) { Text("Edit") }
-                    }
                 }
             }
 
