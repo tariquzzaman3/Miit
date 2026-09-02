@@ -1,13 +1,11 @@
 package com.miit.app.band
 
 /**
- * Small protobuf reader for the Xiaomi command messages used after SPPv2
- * authentication. Unknown fields are skipped so newer firmware can still
- * be read without breaking the connection.
+ * Parser for the Xiaomi protobuf Command messages used after SPPv2 authentication.
  *
- * Command ids mirror Gadgetbridge's XiaomiSystemService and
- * XiaomiWatchfaceService:
- * system=2, watchface=4.
+ * The field numbers here follow Gadgetbridge's xiaomi.proto:
+ * Command.system = field 4, Command.watchface = field 6.
+ * System.displayItems = field 10, Watchface.watchfaceList = field 1.
  */
 object XiaomiCommandParser {
     const val TYPE_SYSTEM = 2
@@ -22,6 +20,9 @@ object XiaomiCommandParser {
     const val SYSTEM_DEVICE_STATE = 79
 
     const val WATCHFACE_LIST = 0
+    const val WATCHFACE_SET = 1
+    const val WATCHFACE_DELETE = 2
+    const val WATCHFACE_INSTALL = 4
 
     data class Parsed(
         val type: Int,
@@ -53,12 +54,11 @@ object XiaomiCommandParser {
             }
         }
 
-        if (type == null) return null
-
-        return when (type) {
-            TYPE_SYSTEM -> parseSystem(type, subtype, system)
-            TYPE_WATCHFACE -> parseWatchface(type, subtype, watchface)
-            else -> Parsed(type, subtype)
+        val t = type ?: return null
+        return when (t) {
+            TYPE_SYSTEM -> parseSystem(t, subtype, system)
+            TYPE_WATCHFACE -> parseWatchface(t, subtype, watchface)
+            else -> Parsed(t, subtype)
         }
     }
 
@@ -70,62 +70,65 @@ object XiaomiCommandParser {
         var charging: Boolean? = null
         var firmware: String? = null
         var model: String? = null
-        var hardware: String? = null
         var serialNumber: String? = null
-        var displays: List<BandDisplay> = emptyList()
+        var displays = emptyList<BandDisplay>()
 
-        val sr = ProtoReader(system)
-        while (sr.hasRemaining()) {
-            val sf = sr.nextField() ?: break
-            when (sf.number) {
-                // System.power
+        val r = ProtoReader(system)
+        while (r.hasRemaining()) {
+            val field = r.nextField() ?: break
+            when (field.number) {
+                // System.power = 2, Power.battery = 1
                 2 -> {
-                    val power = sf.bytes ?: continue
-                    val br = ProtoReader(power)
-                    while (br.hasRemaining()) {
-                        val bf = br.nextField() ?: break
-                        if (bf.number == 1 && bf.bytes != null) {
-                            val b = ProtoReader(bf.bytes)
-                            while (b.hasRemaining()) {
-                                val item = b.nextField() ?: break
-                                when (item.number) {
-                                    1 -> battery = item.varint?.toInt()
-                                    2 -> batteryState = item.varint?.toInt()
-                                }
+                    val power = field.bytes ?: continue
+                    val pr = ProtoReader(power)
+                    while (pr.hasRemaining()) {
+                        val pf = pr.nextField() ?: break
+                        if (pf.number != 1 || pf.bytes == null) continue
+                        val br = ProtoReader(pf.bytes)
+                        while (br.hasRemaining()) {
+                            val bf = br.nextField() ?: break
+                            when (bf.number) {
+                                1 -> battery = bf.varint?.toInt()
+                                2 -> batteryState = bf.varint?.toInt()
                             }
                         }
                     }
                     charging = batteryState == 1
                 }
 
-                // System.deviceInfo
+                // System.deviceInfo = 3
+                // DeviceInfo: serialNumber=1, firmware=2, unknown3=3, model=4
                 3 -> {
-                    val info = sf.bytes ?: continue
+                    val info = field.bytes ?: continue
                     val ir = ProtoReader(info)
                     while (ir.hasRemaining()) {
                         val f = ir.nextField() ?: break
                         when (f.number) {
-                            1 -> firmware = f.stringValue()
-                            2 -> firmware = firmware ?: f.stringValue()
-                            3 -> serialNumber = f.stringValue()
-                            4 -> model = f.stringValue()
-                            5 -> hardware = f.stringValue()
+                            1 -> serialNumber = f.stringValue() ?: serialNumber
+                            2 -> firmware = f.stringValue() ?: firmware
+                            4 -> model = f.stringValue() ?: model
                         }
                     }
                 }
 
-                // System.displayItems. Gadgetbridge models this as a repeated
-                // DisplayItem nested under the displayItems message.
+                // System.displayItems = 10
                 10 -> {
-                    val list = sf.bytes ?: continue
-                    displays = parseDisplayItems(list)
+                    val items = field.bytes ?: continue
+                    val parsed = parseDisplayItems(items)
+                    if (parsed.isNotEmpty()) displays = mergeDisplays(displays, parsed)
                 }
 
-                // Some firmware exposes display items under a different
-                // nested tag. Try it without making it mandatory.
-                11 -> {
-                    val list = sf.bytes ?: continue
-                    if (displays.isEmpty()) displays = parseDisplayItems(list)
+                // Device-state responses can also tell us charging state.
+                49 -> {
+                    val state = field.bytes ?: continue
+                    val sr = ProtoReader(state)
+                    while (sr.hasRemaining()) {
+                        val f = sr.nextField() ?: break
+                        if (f.number == 1) {
+                            val stateValue = f.varint?.toInt()
+                            if (stateValue != null) charging = stateValue == 1
+                        }
+                    }
                 }
             }
         }
@@ -138,7 +141,6 @@ object XiaomiCommandParser {
             charging = charging,
             firmware = firmware,
             model = model,
-            hardware = hardware,
             serialNumber = serialNumber,
             displays = displays
         )
@@ -147,39 +149,53 @@ object XiaomiCommandParser {
     private fun parseDisplayItems(data: ByteArray): List<BandDisplay> {
         val result = mutableListOf<BandDisplay>()
         val r = ProtoReader(data)
+
+        // DisplayItems contains repeated DisplayItem in field 1.
         while (r.hasRemaining()) {
             val f = r.nextField() ?: break
-            if (f.bytes != null) {
-                val candidate = parseDisplayItem(f.bytes)
-                if (candidate.code != null || candidate.name != null) result += candidate
+            if (f.number == 1 && f.bytes != null) {
+                parseDisplayItem(f.bytes)?.let { result += it }
             }
         }
 
-        // A single DisplayItem may also arrive directly rather than wrapped
-        // in a repeated field.
+        // Be tolerant of firmware that returns a single DisplayItem directly.
         if (result.isEmpty()) {
-            val candidate = parseDisplayItem(data)
-            if (candidate.code != null || candidate.name != null) result += candidate
+            parseDisplayItem(data)?.let { result += it }
         }
-        return result.distinctBy { (it.code ?: "") + "\u0000" + (it.name ?: "") }
+
+        return mergeDisplays(emptyList(), result)
     }
 
-    private fun parseDisplayItem(data: ByteArray): BandDisplay {
+    private fun parseDisplayItem(data: ByteArray): BandDisplay? {
         var code: String? = null
         var name: String? = null
         var disabled = false
         var inMore = false
+        var isSettings = false
+
         val r = ProtoReader(data)
         while (r.hasRemaining()) {
             val f = r.nextField() ?: break
             when (f.number) {
-                1 -> code = f.stringValue() ?: f.varint?.toString()
-                2 -> name = f.stringValue() ?: f.varint?.toString()
-                3 -> disabled = (f.varint ?: 0L) != 0L
-                6 -> inMore = (f.varint ?: 0L) != 0L
+                1 -> code = f.stringValue()
+                2 -> name = f.stringValue()
+                3 -> disabled = f.varint == 1L
+                4 -> isSettings = f.varint == 1L
+                6 -> inMore = f.varint == 1L
             }
         }
-        return BandDisplay(code, name, disabled, inMore)
+
+        // Do not expose the band's settings item as a user-editable display.
+        if (isSettings) return null
+        if (code == null && name == null) return null
+
+        return BandDisplay(
+            code = code,
+            name = name,
+            disabled = disabled,
+            inMoreSection = inMore,
+            source = BandDisplay.Source.DISPLAY_ITEM
+        )
     }
 
     private fun parseWatchface(type: Int, subtype: Int, watchface: ByteArray?): Parsed {
@@ -187,48 +203,68 @@ object XiaomiCommandParser {
         if (subtype != WATCHFACE_LIST) return Parsed(type, subtype)
 
         val list = mutableListOf<BandDisplay>()
-        val wr = ProtoReader(watchface)
-        while (wr.hasRemaining()) {
-            val f = wr.nextField() ?: break
-            if (f.number == 1 && f.bytes != null) {
-                val info = ProtoReader(f.bytes)
-                var id: String? = null
-                var name: String? = null
-                var active = false
-                var canDelete = false
-                while (info.hasRemaining()) {
-                    val wf = info.nextField() ?: break
-                    when (wf.number) {
-                        1 -> id = wf.stringValue()
-                        2 -> name = wf.stringValue()
-                        3 -> active = (wf.varint ?: 0L) != 0L
-                        4 -> canDelete = (wf.varint ?: 0L) != 0L
-                    }
-                }
-                if (id != null || name != null) {
-                    list += BandDisplay(
-                        code = id,
-                        name = name,
-                        disabled = false,
-                        inMoreSection = canDelete
-                    )
+        val r = ProtoReader(watchface)
+
+        // Watchface.watchfaceList = field 1; WatchfaceList.watchface is repeated field 1.
+        while (r.hasRemaining()) {
+            val f = r.nextField() ?: break
+            if (f.number != 1 || f.bytes == null) continue
+
+            val info = ProtoReader(f.bytes)
+            var id: String? = null
+            var name: String? = null
+            var active = false
+            var canDelete = false
+
+            while (info.hasRemaining()) {
+                val wf = info.nextField() ?: break
+                when (wf.number) {
+                    1 -> id = wf.stringValue()
+                    2 -> name = wf.stringValue()
+                    3 -> active = wf.varint == 1L
+                    4 -> canDelete = wf.varint == 1L
                 }
             }
+
+            if (id != null || name != null) {
+                list += BandDisplay(
+                    code = id,
+                    name = name,
+                    active = active,
+                    canDelete = canDelete,
+                    source = BandDisplay.Source.WATCHFACE
+                )
+            }
         }
-        return Parsed(type, subtype, displays = list)
+
+        return Parsed(type, subtype, displays = mergeDisplays(emptyList(), list))
     }
 
-    fun systemGet(subtype: Int): ByteArray =
-        command(TYPE_SYSTEM, subtype)
+    private fun mergeDisplays(
+        first: List<BandDisplay>,
+        second: List<BandDisplay>
+    ): List<BandDisplay> {
+        val out = LinkedHashMap<String, BandDisplay>()
+        (first + second).forEach { display ->
+            val key = display.stableId
+            val previous = out[key]
+            out[key] = if (previous == null) display else previous.copy(
+                name = display.name ?: previous.name,
+                disabled = display.disabled || previous.disabled,
+                inMoreSection = display.inMoreSection || previous.inMoreSection,
+                active = display.active || previous.active,
+                canDelete = display.canDelete || previous.canDelete
+            )
+        }
+        return out.values.toList()
+    }
 
-    fun watchfaceListGet(): ByteArray =
-        command(TYPE_WATCHFACE, WATCHFACE_LIST)
+    fun systemGet(subtype: Int): ByteArray = command(TYPE_SYSTEM, subtype)
+
+    fun watchfaceListGet(): ByteArray = command(TYPE_WATCHFACE, WATCHFACE_LIST)
 
     fun command(type: Int, subtype: Int): ByteArray =
         fieldVarint(1, type) + fieldVarint(2, subtype)
-
-    private fun fieldBytes(number: Int, bytes: ByteArray): ByteArray =
-        varint((number shl 3) or 2) + varint(bytes.size) + bytes
 
     private fun fieldVarint(number: Int, value: Int): ByteArray =
         varint(number shl 3) + varint(value)
@@ -251,11 +287,13 @@ object XiaomiCommandParser {
         val varint: Long? = null,
         val bytes: ByteArray? = null
     ) {
-        fun stringValue(): String? = bytes?.toString(Charsets.UTF_8)?.takeIf { it.isNotEmpty() }
+        fun stringValue(): String? =
+            bytes?.toString(Charsets.UTF_8)?.takeIf { it.isNotEmpty() }
     }
 
     private class ProtoReader(private val data: ByteArray) {
         private var pos = 0
+
         fun hasRemaining(): Boolean = pos < data.size
 
         fun nextField(): Field? {
@@ -263,6 +301,7 @@ object XiaomiCommandParser {
             val tag = readVarint() ?: return null
             val number = (tag ushr 3).toInt()
             val wire = (tag and 7).toInt()
+
             return when (wire) {
                 0 -> Field(number, wire, varint = readVarint())
                 1 -> {
