@@ -12,7 +12,9 @@ import java.nio.ByteOrder
 import java.security.SecureRandom
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
+import javax.crypto.Cipher
 import javax.crypto.Mac
+import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import org.bouncycastle.crypto.engines.AESEngine
 import org.bouncycastle.crypto.modes.CCMBlockCipher
