@@ -28,20 +28,24 @@ android {
 
 kotlin { jvmToolchain(17) }
 
-// Gradle 8.9 can report implicit-dependency validation errors for Android
-// dependency-processing outputs used by Kotlin compilation. These tasks must run
-// before Kotlin compilation when they are present, but must not be hard dependencies
-// (some AGP task graphs would otherwise form a cycle).
+/*
+ * AGP 8.7 + Gradle 8.9 validates task inputs strictly. The Android dependency
+ * processing tasks below generate directories that Kotlin compilation consumes.
+ * Declaring them as real dependencies is required; mustRunAfter is insufficient
+ * because it only orders tasks and does not establish the producer/consumer edge.
+ *
+ * Keep this narrowly scoped to the Debug compilation used by CI.
+ */
 tasks.withType<KotlinCompile>().configureEach {
-    mustRunAfter(tasks.matching {
-        it.name.startsWith("check") && it.name.endsWith("DuplicateClasses")
-    })
-    mustRunAfter(tasks.matching {
-        it.name.startsWith("desugar") && it.name.endsWith("FileDependencies")
-    })
-    mustRunAfter(tasks.matching {
-        it.name.startsWith("merge") && it.name.endsWith("JniLibFolders")
-    })
+    if (name == "compileDebugKotlin") {
+        dependsOn(
+            tasks.matching {
+                it.name == "checkDebugDuplicateClasses" ||
+                    it.name == "desugarDebugFileDependencies" ||
+                    it.name == "mergeDebugJniLibFolders"
+            }
+        )
+    }
 }
 
 dependencies {
