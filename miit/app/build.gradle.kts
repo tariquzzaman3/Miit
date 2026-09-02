@@ -28,16 +28,18 @@ android {
 
 kotlin { jvmToolchain(17) }
 
-// Keep these dependency-processing tasks ordered before Kotlin compilation.
-// This avoids Gradle 8.9 validation failures caused by implicit task dependencies.
+// Gradle 8.9 can report implicit-dependency validation errors for Android
+// dependency-processing outputs used by Kotlin compilation. These tasks must run
+// before Kotlin compilation when they are present, but must not be hard dependencies
+// (some AGP task graphs would otherwise form a cycle).
 tasks.withType<KotlinCompile>().configureEach {
-    dependsOn(tasks.matching {
+    mustRunAfter(tasks.matching {
         it.name.startsWith("check") && it.name.endsWith("DuplicateClasses")
     })
-    dependsOn(tasks.matching {
+    mustRunAfter(tasks.matching {
         it.name.startsWith("desugar") && it.name.endsWith("FileDependencies")
     })
-    dependsOn(tasks.matching {
+    mustRunAfter(tasks.matching {
         it.name.startsWith("merge") && it.name.endsWith("JniLibFolders")
     })
 }
