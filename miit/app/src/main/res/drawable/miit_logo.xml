@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="512dp"
+    android:height="512dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <!-- Square app-drawer background matching the supplied Miit logo. -->
+    <path android:fillColor="#07102F"
+        android:pathData="M0,0h512v512h-512z" />
+
+    <!-- Smart-band loop -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#17649A"
+        android:strokeWidth="42"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M184,109 C105,124 76,193 88,286 C99,372 153,422 220,404" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#14355F"
+        android:strokeWidth="25"
+        android:strokeLineCap="round"
+        android:pathData="M150,108 C103,151 101,226 111,296 C121,359 157,389 202,389" />
+
+    <!-- Rear teal card -->
+    <path
+        android:fillColor="#31C9B7"
+        android:pathData="M289,118 C301,107 317,106 335,112 L423,145 C441,152 449,169 444,188 L410,333 C406,350 389,361 372,357 L280,329 C262,324 252,306 257,288 L287,136 C288,130 289,124 289,118z" />
+    <path
+        android:fillColor="#178D83"
+        android:pathData="M257,288 C291,278 320,258 344,232 C365,209 384,181 399,158 L423,167 L391,317 C388,331 376,338 362,334 L278,309 C265,305 258,297 257,288z" />
+    <path
+        android:fillColor="#07102F"
+        android:pathData="M326,157 C326,136 343,119 364,119 C385,119 402,136 402,157 C402,178 385,195 364,195 C343,195 326,178 326,157z" />
+
+    <!-- Band body -->
+    <path
+        android:fillColor="#0B1222"
+        android:pathData="M178,82 C178,60 196,43 218,43 L269,43 C291,43 309,60 309,82 L309,368 C309,390 291,407 269,407 L218,407 C196,407 178,390 178,368z" />
+    <path
+        android:fillColor="#55D8C7"
+        android:pathData="M190,92 C190,69 209,52 232,52 L267,52 C290,52 307,69 307,92 L307,358 C307,381 290,398 267,398 L232,398 C209,398 190,381 190,358z" />
+    <path
+        android:fillColor="#0B1222"
+        android:pathData="M202,101 C202,82 216,68 235,68 L265,68 C284,68 298,82 298,101 L298,350 C298,369 284,383 265,383 L235,383 C216,383 202,369 202,350z" />
+
+    <!-- Band UI -->
+    <path android:fillColor="#55D8C7"
+        android:pathData="M219,139 C219,119 235,103 255,103 C275,103 291,119 291,139 C291,159 275,175 255,175 C235,175 219,159 219,139z" />
+    <path android:fillColor="#F2F2F4"
+        android:pathData="M230,215 L255,186 L280,215 C288,225 281,239 268,239 L242,239 C229,239 222,225 230,215z" />
+    <path android:fillColor="#F56B59"
+        android:pathData="M221,285 C221,265 237,249 257,249 C277,249 293,265 293,285 C293,305 277,321 257,321 C237,321 221,305 221,285z" />
+
+    <!-- Pencil -->
+    <path
+        android:fillColor="#F0F2F5"
+        android:pathData="M330,372 L389,276 L438,305 L379,401 L330,372z" />
+    <path
+        android:fillColor="#E6E8ED"
+        android:pathData="M389,276 L403,253 L452,282 L438,305 L389,276z" />
+    <path
+        android:fillColor="#31C9B7"
+        android:pathData="M403,253 L417,230 C423,220 436,218 446,224 L464,235 C474,241 477,254 471,264 L452,282 L403,253z" />
+    <path
+        android:fillColor="#F56B59"
+        android:pathData="M330,372 L320,409 L350,392 L330,372z" />
+    <path
+        android:fillColor="#2E3440"
+        android:pathData="M320,409 L350,392 L330,372z" />
+</vector>
