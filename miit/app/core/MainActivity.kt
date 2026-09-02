@@ -12,7 +12,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,20 +32,25 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -96,7 +103,7 @@ private fun MiitApp() {
     var connectedBand by remember { mutableStateOf<BandDevice?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showAuthKeyHelp by remember { mutableStateOf(false) }
-    var editingDisplay by remember { mutableStateOf<String?>(null) }
+    var editingDisplay by remember { mutableStateOf<BandDisplay?>(null) }
 
     val authenticatedDevice = devices.firstOrNull { it.authenticated }
 
@@ -363,27 +370,36 @@ private fun BandScreen(
 }
 
 @Composable
-private fun RuntimeDisplayCard(display: BandDisplay, onEdit: (String) -> Unit) {
-    val name = display.name ?: display.code ?: "Unnamed display"
-    val code = display.code ?: "no code"
+private fun RuntimeDisplayCard(display: BandDisplay, onEdit: (BandDisplay) -> Unit) {
+    val name = display.name?.takeIf { it.isNotBlank() }
+        ?: display.code?.takeIf { it.isNotBlank() }
+        ?: "Unnamed display"
+
     Card(Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Column(
+                Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
                 Text(name, style = MaterialTheme.typography.titleMedium)
-                Text("Code: $code")
-                Text(
-                    when {
-                        display.disabled -> "Disabled on band"
-                        display.inMoreSection -> "More section"
-                        else -> "Available"
-                    }
-                )
+                display.code?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
+                val flags = buildList {
+                    if (display.active) add("Current")
+                    if (display.inMoreSection) add("More")
+                    if (display.canDelete) add("Removable")
+                    if (display.disabled) add("Disabled")
+                }
+                if (flags.isNotEmpty()) Text(flags.joinToString(" • "))
             }
-            Button(
-                onClick = { onEdit(name) },
+            Spacer(Modifier.width(8.dp))
+            OutlinedButton(
+                onClick = { onEdit(display) },
                 enabled = !display.disabled
             ) { Text("Edit") }
         }
@@ -393,56 +409,122 @@ private fun RuntimeDisplayCard(display: BandDisplay, onEdit: (String) -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EditorScreen(
-    displayName: String?,
+    display: BandDisplay?,
     onBack: () -> Unit,
     onAction: (String) -> Unit
 ) {
-    var tool by remember { mutableStateOf("Select") }
+    var selectedTool by remember { mutableStateOf("Select") }
     var menuExpanded by remember { mutableStateOf(false) }
+    val tools = listOf("Select", "Text", "Image", "Shape", "Sticker", "Filter", "Font", "Align")
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(displayName ?: "Custom display") },
-                navigationIcon = { IconButton(onClick = onBack) { Text("‹", style = MaterialTheme.typography.headlineMedium) } },
+            SmallTopAppBar(
+                title = { Text(display?.name ?: "Custom display") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Text("‹", style = MaterialTheme.typography.headlineMedium)
+                    }
+                },
                 actions = {
-                    IconButton(onClick = { menuExpanded = true }) { Text("⋮", style = MaterialTheme.typography.headlineMedium) }
-                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                        DropdownMenuItem(text = { Text("Save on phone") }, onClick = { menuExpanded = false; onAction("save") })
-                        DropdownMenuItem(text = { Text("Share") }, onClick = { menuExpanded = false; onAction("share") })
-                        DropdownMenuItem(text = { Text("Set as band display") }, onClick = { menuExpanded = false; onAction("band") })
+                    IconButton(onClick = { menuExpanded = true }) {
+                        Text("⋮", style = MaterialTheme.typography.headlineMedium)
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Save on phone") },
+                            onClick = { menuExpanded = false; onAction("save") }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Share") },
+                            onClick = { menuExpanded = false; onAction("share") }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Set as band display") },
+                            onClick = { menuExpanded = false; onAction("band") }
+                        )
                     }
                 }
             )
         }
     ) { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding).padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            Modifier.fillMaxSize().padding(padding),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Card(Modifier.fillMaxWidth().weight(1f)) {
-                Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Editor", style = MaterialTheme.typography.titleLarge)
-                    Card(Modifier.fillMaxWidth().weight(1f)) {
-                        Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
-                            Text("12:45", style = MaterialTheme.typography.displayLarge)
-                            Spacer(Modifier.height(8.dp))
-                            Text("Tuesday  •  25 Aug")
-                            Spacer(Modifier.height(16.dp))
-                            Text("♥ 72   •   6,421 steps")
+            Surface(
+                Modifier.fillMaxWidth().weight(1f),
+                tonalElevation = 2.dp
+            ) {
+                Column(
+                    Modifier.fillMaxSize().padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Canvas", style = MaterialTheme.typography.labelLarge)
+                        Text("Band display", style = MaterialTheme.typography.labelMedium)
+                    }
+
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Card(Modifier.width(174.dp).height(238.dp)) {
+                            Column(
+                                Modifier.fillMaxSize().padding(14.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    "12:45",
+                                    style = MaterialTheme.typography.displayMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                Text("Tuesday  •  25 Aug")
+                                Spacer(Modifier.height(18.dp))
+                                Text("♥ 72   •   6,421")
+                                Spacer(Modifier.height(12.dp))
+                                Text(selectedTool, style = MaterialTheme.typography.labelSmall)
+                            }
                         }
+                    }
+
+                    Text("Tool: $selectedTool", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+
+            Divider()
+
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                tools.forEach { tool ->
+                    OutlinedButton(onClick = { selectedTool = tool }) {
+                        Text(if (tool == selectedTool) "✓ $tool" else tool)
                     }
                 }
             }
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+
+            Button(
+                onClick = { onAction("save") },
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp)
             ) {
-                listOf("Select", "Text", "Image", "Shape", "AI", "Font").forEach { toolName ->
-                    Button(onClick = { tool = toolName }) {
-                        Text(if (tool == toolName) "✓ $toolName" else toolName)
-                    }
-                }
+                Text("Save display")
             }
         }
     }
@@ -491,24 +573,25 @@ private fun FloatingLogButton(modifier: Modifier = Modifier) {
     var offset by remember { mutableStateOf(Offset.Zero) }
 
     Box(
-        modifier = modifier
+        modifier
             .offset { IntOffset(offset.x.roundToInt(), offset.y.roundToInt()) }
             .pointerInput(Unit) {
-                detectDragGestures(
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        offset += dragAmount
-                    }
-                )
+                detectDragGestures { change, amount ->
+                    change.consume()
+                    offset += amount
+                }
             }
     ) {
-        Button(onClick = {
-            val log = MiitTestLog.text(context)
-            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("Miit testing logs", log))
-            Toast.makeText(context, "Testing log copied.", Toast.LENGTH_LONG).show()
-        }) {
-            Text("LOG")
+        FloatingActionButton(
+            onClick = {
+                val log = MiitTestLog.text(context)
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("Miit testing logs", log))
+                Toast.makeText(context, "Testing log copied.", Toast.LENGTH_LONG).show()
+            },
+            shape = RectangleShape
+        ) {
+            Text("LOG", fontWeight = FontWeight.Bold)
         }
     }
 }
