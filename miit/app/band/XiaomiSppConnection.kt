@@ -30,7 +30,8 @@ class XiaomiSppConnection(
     private val device: BluetoothDevice,
     private val authKey: ByteArray,
     private val onEvent: (String) -> Unit,
-    private val onState: (BandConnectionState) -> Unit
+    private val onState: (BandConnectionState) -> Unit,
+    private val onData: (BandDataUpdate) -> Unit = {}
 ) {
     companion object {
         private val SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
@@ -235,13 +236,41 @@ class XiaomiSppConnection(
                 // Gadgetbridge processes the command before acknowledging the received frame.
                 if (rawChannel == 1) {
                     val commandBody = if (opcode == 2 && authenticated) auth?.decryptV2(body) ?: body else body
-                    auth?.handleCommand(commandBody)
+                    if (authenticated) {
+                        handleRuntimeCommand(commandBody)
+                    } else {
+                        auth?.handleCommand(commandBody)
+                    }
                 }
                 sendAck(sequence)
             }
             else -> onEvent("Xiaomi SPPv2 unsupported packet type=$packetType sequence=$sequence")
         }
         return true
+    }
+
+    private fun handleRuntimeCommand(commandBody: ByteArray) {
+        val parsed = XiaomiCommandParser.parse(commandBody)
+        if (parsed == null) {
+            onEvent("Xiaomi command: protobuf parse failed bytes=${commandBody.size}")
+            return
+        }
+        onEvent("Xiaomi command: type=${parsed.type} subtype=${parsed.subtype}")
+        if (parsed.battery != null || parsed.batteryState != null || parsed.charging != null ||
+            parsed.firmware != null || parsed.model != null || parsed.hardware != null ||
+            parsed.serialNumber != null
+        ) {
+            onData(BandDataUpdate(
+                batteryPercentage = parsed.battery,
+                batteryState = parsed.batteryState,
+                charging = parsed.charging,
+                firmware = parsed.firmware,
+                model = parsed.model,
+                hardware = parsed.hardware,
+                serialNumber = parsed.serialNumber
+            ))
+        }
+        if (parsed.displays.isNotEmpty()) onData(BandDataUpdate(displays = parsed.displays))
     }
 
     private fun startAuthentication() {
@@ -253,11 +282,40 @@ class XiaomiSppConnection(
             onResult = { success ->
                 authenticated = success
                 onState(if (success) BandConnectionState.Authenticated else BandConnectionState.Error)
-                if (success) onEvent("Xiaomi auth: initialized")
+                if (success) {
+                    onEvent("Xiaomi auth: initialized")
+                    requestInitialRuntimeData()
+                }
             },
             sendPlain = { payload -> sendData(payload, encrypted = false) }
         )
         auth?.start()
+    }
+
+    private fun requestInitialRuntimeData() {
+        val requests = listOf(
+            "device info" to XiaomiCommandParser.systemGet(XiaomiCommandParser.SYSTEM_DEVICE_INFO),
+            "device state" to XiaomiCommandParser.systemGet(XiaomiCommandParser.SYSTEM_DEVICE_STATE_GET),
+            "battery" to XiaomiCommandParser.systemGet(XiaomiCommandParser.SYSTEM_BATTERY),
+            "display items" to XiaomiCommandParser.systemGet(XiaomiCommandParser.SYSTEM_DISPLAY_ITEMS_GET),
+            "widgets" to XiaomiCommandParser.systemGet(XiaomiCommandParser.SYSTEM_WIDGET_SCREENS_GET),
+            "widget parts" to XiaomiCommandParser.systemGet(XiaomiCommandParser.SYSTEM_WIDGET_PARTS_GET),
+            "watchface list" to XiaomiCommandParser.watchfaceListGet()
+        )
+        requests.forEach { (name, payload) -> sendProtoCommand(name, payload) }
+    }
+
+    fun sendProtoCommand(name: String, payload: ByteArray): Boolean {
+        if (!running || !authenticated || auth == null) {
+            onEvent("Xiaomi SPP: send '$name' rejected; not authenticated")
+            return false
+        }
+        val encryptedPayload = auth?.encryptV2(payload) ?: return false
+        val raw = byteArrayOf(1, 2) + encryptedPayload
+        val sequence = txSequence.getAndIncrement() and 0xFF
+        sendRaw(encodeV2(3, sequence, raw))
+        onEvent("Xiaomi SPPv2: sent encrypted command '$name' sequence=$sequence bytes=${payload.size}")
+        return true
     }
 
     private fun sendAck(sequence: Int) {
@@ -343,6 +401,7 @@ private class XiaomiSppAuthenticator(
     private var encryptionKey = ByteArray(16)
     private var decryptionKey = ByteArray(16)
     private var encryptionNonce = ByteArray(4)
+    private var decryptionNonce = ByteArray(4)
 
     fun start() {
         SecureRandom().nextBytes(phoneNonce)
@@ -367,6 +426,7 @@ private class XiaomiSppAuthenticator(
                 val derived = derive(secretKey, phoneNonce, watch.nonce)
                 decryptionKey = derived.copyOfRange(0, 16)
                 encryptionKey = derived.copyOfRange(16, 32)
+                decryptionNonce = derived.copyOfRange(32, 36)
                 encryptionNonce = derived.copyOfRange(36, 40)
 
                 val expectedHmac = hmac(decryptionKey, watch.nonce + phoneNonce)
@@ -407,15 +467,17 @@ private class XiaomiSppAuthenticator(
         return false
     }
 
-    fun decryptV2(ciphertext: ByteArray): ByteArray = try {
-        val cipher = javax.crypto.Cipher.getInstance("AES/CCM/NoPadding")
-        cipher.init(javax.crypto.Cipher.DECRYPT_MODE, SecretKeySpec(decryptionKey, "AES"), javax.crypto.spec.IvParameterSpec(packetNonce(derivedNonce(), 0)))
-        cipher.doFinal(ciphertext)
-    } catch (_: Throwable) {
-        ciphertext
-    }
+    fun encryptV2(message: ByteArray): ByteArray =
+        ctrCrypt(Cipher.ENCRYPT_MODE, encryptionKey, encryptionKey, message)
 
-    private fun derivedNonce(): ByteArray = ByteArray(4)
+    fun decryptV2(ciphertext: ByteArray): ByteArray =
+        ctrCrypt(Cipher.DECRYPT_MODE, decryptionKey, decryptionKey, ciphertext)
+
+    private fun ctrCrypt(op: Int, key: ByteArray, iv: ByteArray, message: ByteArray): ByteArray {
+        val cipher = Cipher.getInstance("AES/CTR/NoPadding")
+        cipher.init(op, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
+        return cipher.doFinal(message)
+    }
 
     private fun derive(secret: ByteArray, phone: ByteArray, watch: ByteArray): ByteArray {
         val initial = hmac(phone + watch, secret)
