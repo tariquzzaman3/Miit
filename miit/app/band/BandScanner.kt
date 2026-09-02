@@ -225,6 +225,7 @@ class BandScanner(context: Context) {
             device = remote,
             authKey = key.copyOf(),
             onEvent = { MiitTestLog.add(it) },
+            onData = { update -> updateData(device.address, update) },
             onState = { newState ->
                 _state.value = newState
                 when (newState) {
@@ -236,6 +237,23 @@ class BandScanner(context: Context) {
         )
         MiitTestLog.add("Starting Xiaomi RFCOMM/SPP transport after Android bond")
         spp?.connect()
+    }
+
+    private fun updateData(address: String, update: BandDataUpdate) {
+        _devices.value = _devices.value.map { item ->
+            if (!item.address.equals(address, true)) return@map item
+            item.copy(
+                model = update.model ?: item.model,
+                firmware = update.firmware ?: item.firmware,
+                hardware = update.hardware ?: item.hardware,
+                serialNumber = update.serialNumber ?: item.serialNumber,
+                batteryPercentage = update.batteryPercentage ?: item.batteryPercentage,
+                batteryState = update.batteryState ?: item.batteryState,
+                charging = update.charging ?: item.charging,
+                displays = if (update.displays != null) update.displays else item.displays,
+                heartRate = update.heartRate ?: item.heartRate
+            )
+        }
     }
 
     private fun updateConnected(address: String, connected: Boolean, authenticated: Boolean) {
