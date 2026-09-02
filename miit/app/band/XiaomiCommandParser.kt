@@ -34,7 +34,9 @@ object XiaomiCommandParser {
         val model: String? = null,
         val hardware: String? = null,
         val serialNumber: String? = null,
-        val displays: List<BandDisplay> = emptyList()
+        val displays: List<BandDisplay> = emptyList(),
+        val screenItems: List<BandDisplay> = emptyList(),
+        val watchfaces: List<BandDisplay> = emptyList()
     )
 
     fun parse(data: ByteArray): Parsed? {
@@ -142,7 +144,8 @@ object XiaomiCommandParser {
             firmware = firmware,
             model = model,
             serialNumber = serialNumber,
-            displays = displays
+            displays = displays,
+            screenItems = displays
         )
     }
 
@@ -205,17 +208,20 @@ object XiaomiCommandParser {
         val list = mutableListOf<BandDisplay>()
         val r = ProtoReader(watchface)
 
-        // Watchface.watchfaceList = field 1; WatchfaceList.watchface is repeated field 1.
+        // Normal wire form is Watchface -> field 1 WatchfaceList -> repeated field 1 WatchfaceInfo.
+        // Be tolerant of firmware that returns WatchfaceInfo directly as repeated field 1.
+        val outer = mutableListOf<ByteArray>()
         while (r.hasRemaining()) {
             val f = r.nextField() ?: break
-            if (f.number != 1 || f.bytes == null) continue
+            if (f.number == 1 && f.bytes != null) outer += f.bytes
+        }
 
-            val info = ProtoReader(f.bytes)
+        fun parseInfo(data: ByteArray): BandDisplay? {
+            val info = ProtoReader(data)
             var id: String? = null
             var name: String? = null
             var active = false
             var canDelete = false
-
             while (info.hasRemaining()) {
                 val wf = info.nextField() ?: break
                 when (wf.number) {
@@ -225,19 +231,40 @@ object XiaomiCommandParser {
                     4 -> canDelete = wf.varint == 1L
                 }
             }
-
-            if (id != null || name != null) {
-                list += BandDisplay(
+            return if (id != null || name != null) {
+                BandDisplay(
                     code = id,
                     name = name,
                     active = active,
                     canDelete = canDelete,
                     source = BandDisplay.Source.WATCHFACE
                 )
+            } else null
+        }
+
+        for (entry in outer) {
+            // If entry itself looks like WatchfaceInfo, use it.
+            val direct = parseInfo(entry)
+            if (direct != null) {
+                list += direct
+                continue
+            }
+            // Otherwise it is the WatchfaceList container.
+            val nested = ProtoReader(entry)
+            while (nested.hasRemaining()) {
+                val nf = nested.nextField() ?: break
+                if (nf.number == 1 && nf.bytes != null) {
+                    parseInfo(nf.bytes)?.let { list += it }
+                }
             }
         }
 
-        return Parsed(type, subtype, displays = mergeDisplays(emptyList(), list))
+        return Parsed(
+            type = type,
+            subtype = subtype,
+            displays = mergeDisplays(emptyList(), list),
+            watchfaces = mergeDisplays(emptyList(), list)
+        )
     }
 
     private fun mergeDisplays(
