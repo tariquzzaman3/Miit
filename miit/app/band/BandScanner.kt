@@ -250,10 +250,27 @@ class BandScanner(context: Context) {
                 batteryPercentage = update.batteryPercentage ?: item.batteryPercentage,
                 batteryState = update.batteryState ?: item.batteryState,
                 charging = update.charging ?: item.charging,
-                displays = if (update.displays != null) update.displays else item.displays,
+                displays = mergeDisplays(item.displays, update.displays),
                 heartRate = update.heartRate ?: item.heartRate
             )
         }
+    }
+
+    private fun mergeDisplays(existing: List<BandDisplay>, incoming: List<BandDisplay>?): List<BandDisplay> {
+        if (incoming.isNullOrEmpty()) return existing
+        val byId = LinkedHashMap<String, BandDisplay>()
+        (existing + incoming).forEach { display ->
+            val key = display.stableId
+            val previous = byId[key]
+            byId[key] = if (previous == null) display else previous.copy(
+                name = display.name ?: previous.name,
+                disabled = display.disabled || previous.disabled,
+                inMoreSection = display.inMoreSection || previous.inMoreSection,
+                active = display.active || previous.active,
+                canDelete = display.canDelete || previous.canDelete
+            )
+        }
+        return byId.values.toList()
     }
 
     private fun updateConnected(address: String, connected: Boolean, authenticated: Boolean) {
