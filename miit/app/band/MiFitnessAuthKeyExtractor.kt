@@ -23,6 +23,7 @@ object MiFitnessAuthKeyExtractor {
         Regex("""(?is)["'](?:auth[_-]?key|authkey|encrypt[_-]?key|token)["']\\s*:\\s*["']([0-9a-f]{32})["']"""),
         Regex("""(?is)\\b(?:token|encryptKey|authKey)\\s*=\\s*["']?([0-9a-f]{32})["']?""")
     )
+
     private val devicePatterns = listOf(
         Regex("""(?i)\\b(?:mac|bluetooth[_-]?address|device[_-]?id)\\s*[=:]\\s*["']?([0-9a-f:]{12,17})["']?"""),
         Regex("""(?i)\\b(MI[_ -]?BAND[^\\r\\n,;]*)""")
@@ -51,16 +52,29 @@ object MiFitnessAuthKeyExtractor {
             }
         }
 
-        // Exact user-described layout: Download/wearablelog/<timestamp>log.zip
-        val wearableLog = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).resolve("wearablelog")
-        if (wearableLog.exists()) scanDirectory(wearableLog, inspect)
+        // Expected Mi Fitness export layout: Download/wearablelog/<timestamp>log.zip
+        val wearableLog = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            .resolve("wearablelog")
+        if (wearableLog.exists()) {
+            scanDirectory(wearableLog) { text, source -> inspect(text, source) }
+        }
 
-        // Newer Android: query the shared Downloads collection for the wearablelog ZIP.
+        // Newer Android: use the shared Downloads collection when it exposes the folder.
         if (Build.VERSION.SDK_INT >= 29) {
             val resolver = context.contentResolver
-            val projection = arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.DISPLAY_NAME, MediaStore.Downloads.RELATIVE_PATH)
+            val projection = arrayOf(
+                MediaStore.Downloads._ID,
+                MediaStore.Downloads.DISPLAY_NAME,
+                MediaStore.Downloads.RELATIVE_PATH
+            )
             runCatching {
-                resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, projection, null, null, MediaStore.Downloads.DATE_MODIFIED + " DESC")?.use { cursor ->
+                resolver.query(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    projection,
+                    null,
+                    null,
+                    MediaStore.Downloads.DATE_MODIFIED + " DESC"
+                )?.use { cursor ->
                     val idCol = cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
                     val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
                     val pathCol = cursor.getColumnIndexOrThrow(MediaStore.Downloads.RELATIVE_PATH)
@@ -68,21 +82,27 @@ object MiFitnessAuthKeyExtractor {
                         val name = cursor.getString(nameCol).orEmpty()
                         val path = cursor.getString(pathCol).orEmpty()
                         if (!path.contains("wearablelog", true) && !name.contains("wearablelog", true)) continue
-                        val uri = Uri.withAppendedPath(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cursor.getLong(idCol).toString())
-                        resolver.openInputStream(uri)?.use { input -> inspectStream(input, name, "Downloads/$path$name", ::inspect) }
+                        val uri = Uri.withAppendedPath(
+                            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                            cursor.getLong(idCol).toString()
+                        )
+                        resolver.openInputStream(uri)?.use { input ->
+                            inspectStream(input, name, "Downloads/$path$name") { text, source -> inspect(text, source) }
+                        }
                     }
                 }
             }
         }
 
-        // Older Android installations may expose the app-private log directory directly.
+        // Older Android installations may expose Mi Fitness private logs directly.
         listOf(
             "/storage/emulated/0/Android/data/com.xiaomi.wearable/files/log",
             "/storage/emulated/0/Android/data/com.mi.health/files/log"
         ).forEach { path ->
-            val dir = File(path)
-            if (dir.exists()) scanDirectory(dir, inspect)
+            val directory = File(path)
+            if (directory.exists()) scanDirectory(directory) { text, source -> inspect(text, source) }
         }
+
         return candidates.values.toList()
     }
 
@@ -100,28 +120,39 @@ object MiFitnessAuthKeyExtractor {
         }
         runCatching {
             context.contentResolver.openInputStream(uri)?.use { input ->
-                inspectStream(input, "selected-log", uri.toString(), ::inspect)
+                inspectStream(input, "selected-log", uri.toString()) { text, source -> inspect(text, source) }
             }
         }
         return candidates.values.toList()
     }
 
     private fun scanDirectory(directory: File, inspect: (String, String) -> Unit) {
-        directory.listFiles()?.sortedByDescending { it.lastModified() }?.take(100)?.forEach { file ->
-            if (!file.isFile) return@forEach
-            runCatching { file.inputStream().use { inspectStream(it, file.name, file.absolutePath, inspect) } }
-        }
+        directory.listFiles()
+            ?.sortedByDescending { it.lastModified() }
+            ?.take(100)
+            ?.forEach { file ->
+                if (!file.isFile) return@forEach
+                runCatching {
+                    file.inputStream().use { input ->
+                        inspectStream(input, file.name, file.absolutePath, inspect)
+                    }
+                }
+            }
     }
 
-    private fun inspectStream(input: InputStream, name: String, source: String, inspect: (String, String) -> Unit) {
-        if (name.endsWith(".zip", true)) {
+    private fun inspectStream(
+        input: InputStream,
+        name: String,
+        source: String,
+        inspect: (String, String) -> Unit
+    ) {
+        if (name.endsWith(".zip", ignoreCase = true)) {
             ZipInputStream(input.buffered()).use { zip ->
                 var entry = zip.nextEntry
                 while (entry != null) {
                     if (!entry.isDirectory) {
                         val bytes = zip.readBytesLimited(8 * 1024 * 1024)
-                        // The export contains multiple log files; search every text/log entry,
-                        // not just files whose names happen to contain the key's field name.
+                        // Search every file inside the export: auth-key logs do not need a special filename.
                         inspect(bytes.toString(Charsets.UTF_8), "$source!/${entry.name}")
                     }
                     entry = zip.nextEntry
