@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.miit.app.band.BandDisplay
+import com.miit.app.band.BandDevice
 
 private enum class EditorElementType {
     TIME, DATE, WEEKDAY, HEART_RATE, SPO2, STEPS, BATTERY, RELAXATION,
@@ -65,13 +66,15 @@ private data class EditorElement(
     val y: Int = 50,
     val color: Color = Color.White,
     val visible: Boolean = true,
-    val locked: Boolean = false
+    val locked: Boolean = false,
+    val alignment: String = "Center"
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MiitWatchFaceEditor(
     display: BandDisplay?,
+    device: BandDevice?,
     onBack: () -> Unit,
     onAction: (String) -> Unit
 ) {
@@ -479,7 +482,7 @@ private fun StoreCheckDialog(
 private fun EditorPreview(elements: List<EditorElement>, aod: Boolean, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().background(Color.Black), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(if (aod) "AOD preview" else "Watch-face preview", color = Color.White, modifier = Modifier.padding(12.dp))
-        WatchCanvas(elements, 0, {})
+        WatchCanvas(elements, 0, {}, {})
         Button(onClick = onBack) { Text("Back to editor") }
     }
 }
