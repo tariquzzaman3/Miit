@@ -1,5 +1,6 @@
 package com.miit.app
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -42,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -90,7 +92,7 @@ fun MiitWatchFaceEditor(
     var aodEnabled by remember { mutableStateOf(false) }
     var zoom by remember { mutableStateOf("Fit") }
 
-    val selected = elements.firstOrNull { it.id == selectedId }
+    val selected = elements.firstOrNull { it.id == selectedId }\n    val context = LocalContext.current\n    val profile = remember(device?.model, device?.name) { DeviceProfileResolver.resolve(device?.model ?: device?.name) }
 
     fun add(type: EditorElementType, preview: String) {
         val id = nextId++
@@ -140,12 +142,12 @@ fun MiitWatchFaceEditor(
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Canvas • 192 × 490 px", style = MaterialTheme.typography.labelMedium)
+                                Text("Canvas • \${profile.width} × \${profile.height} px • \${profile.source}", style = MaterialTheme.typography.labelMedium)
                                 OutlinedButton(onClick = {
                                     zoom = if (zoom == "Fit") "100%" else "Fit"
                                 }) { Text(zoom) }
                             }
-                            WatchCanvas(elements, selectedId, onSelect = { selectedId = it })
+                            WatchCanvas(elements, selectedId, onSelect = { selectedId = it }, onMove = { id, dx, dy ->\n                                val index = elements.indexOfFirst { it.id == id }\n                                if (index >= 0 && !elements[index].locked) {\n                                    val e = elements[index]\n                                    elements[index] = e.copy(x = (e.x + dx).coerceIn(0, 100), y = (e.y + dy).coerceIn(0, 100))\n                                }\n                            })
                         }
 
                         if (propertiesOpen && selected != null) {
@@ -170,7 +172,7 @@ fun MiitWatchFaceEditor(
                     ) {
                         Button(onClick = { addOpen = true }) { Text("+ Element") }
                         OutlinedButton(onClick = { propertiesOpen = !propertiesOpen }) { Text("Properties") }
-                        OutlinedButton(onClick = { onAction("save") }) { Text("Save") }
+                        OutlinedButton(onClick = {\n                            WatchfaceProjectStore.save(context, display?.name ?: "MIIT watch face", profile.width, profile.height, aodEnabled, serializeElements(elements))\n                            Toast.makeText(context, "Project saved on this phone.", Toast.LENGTH_SHORT).show()\n                            onAction("save")\n                        }) { Text("Save") }
                         OutlinedButton(onClick = { onAction("share") }) { Text("Share") }
                         OutlinedButton(onClick = { onAction("band") }) { Text("Set on Band") }
                         OutlinedButton(onClick = { storeCheckOpen = true }) { Text("Store check") }
@@ -206,7 +208,7 @@ fun MiitWatchFaceEditor(
 }
 
 @Composable
-private fun WatchCanvas(elements: List<EditorElement>, selectedId: Int, onSelect: (Int) -> Unit) {
+private fun WatchCanvas(elements: List<EditorElement>, selectedId: Int, onSelect: (Int) -> Unit, onMove: (Int, Int, Int) -> Unit = { _, _, _ -> }) {
     Box(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center
@@ -293,7 +295,7 @@ private fun EditorProperties(
             Text("Alignment")
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("Left", "Center", "Right").forEach { alignment ->
-                    OutlinedButton(onClick = { onChange(element.copy(label = element.label)) }) { Text(alignment) }
+                    OutlinedButton(onClick = { onChange(element.copy(alignment = alignment)) }) { Text(alignment) }
                 }
             }
 
@@ -469,3 +471,25 @@ private fun EditorPreview(elements: List<EditorElement>, aod: Boolean, onBack: (
         Button(onClick = onBack) { Text("Back to editor") }
     }
 }
+
+
+private data class DeviceProfile(val width: Int, val height: Int, val source: String)
+
+private object DeviceProfileResolver {
+    fun resolve(model: String?): DeviceProfile {
+        val m = model.orEmpty().lowercase()
+        return when {
+            "band 10" in m || "smart band 10" in m -> DeviceProfile(212, 520, "Xiaomi Smart Band 10")
+            "band 9" in m || "smart band 9" in m -> DeviceProfile(192, 490, "Xiaomi Smart Band 9")
+            else -> DeviceProfile(192, 490, "Fallback profile — verify target device")
+        }
+    }
+}
+
+private fun serializeElements(elements: List<EditorElement>): String =
+    elements.joinToString(prefix = "[", postfix = "]") { e ->
+        "{\"id\":${e.id},\"type\":\"${jsonEscape(e.type.name)}\",\"label\":\"${jsonEscape(e.label)}\",\"preview\":\"${jsonEscape(e.preview)}\",\"format\":\"${jsonEscape(e.format)}\",\"size\":${e.size},\"x\":${e.x},\"y\":${e.y},\"color\":\"${e.color.value.toLong().toString(16)}\",\"visible\":${e.visible},\"locked\":${e.locked},\"alignment\":\"${jsonEscape(e.alignment)}\"}"
+    }
+
+private fun jsonEscape(value: String): String =
+    value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
