@@ -163,6 +163,7 @@ private fun MiitApp() {
 
             MiitScreen.EDITOR -> EditorScreen(
                 display = editingDisplay,
+                device = connectedBand,
                 onBack = { screen = MiitScreen.BAND },
                 onAction = { action ->
                     when (action) {
@@ -412,10 +413,12 @@ private fun RuntimeDisplayCard(display: BandDisplay, onEdit: (BandDisplay) -> Un
 @Composable
 private fun EditorScreen(
     display: BandDisplay?,
+    device: BandDevice?,
     onBack: () -> Unit,
     onAction: (String) -> Unit
 ) = MiitWatchFaceEditor(
     display = display,
+    device = device,
     onBack = onBack,
     onAction = onAction
 )
