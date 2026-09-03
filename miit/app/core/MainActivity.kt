@@ -1,6 +1,8 @@
 package com.miit.app
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -29,8 +31,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PasswordVisualTransformation
@@ -41,12 +45,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.compose.foundation.gestures.detectDragGestures
 import com.miit.app.band.AuthKeyParser
 import com.miit.app.band.BandConnectionState
 import com.miit.app.band.BandDevice
@@ -57,6 +66,7 @@ import com.miit.app.band.MiFitnessAuthKeyExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 private enum class MiitScreen { CONNECTION, BAND, EDITOR }
 
@@ -133,7 +143,7 @@ private fun MiitApp() {
                         val found = withContext(Dispatchers.IO) { MiFitnessAuthKeyExtractor.find(context) }
                         authCandidates = found
                         authSearchStatus = when {
-                            found.isEmpty() -> "No key found in wearablelog. Use the manual fallback or inspect the exported ZIP."
+                            found.isEmpty() -> "No key found in Download/wearablelog. Use the manual fallback."
                             found.size == 1 -> "Auth key found in Mi Fitness export ✓"
                             else -> "Multiple keys found. Choose the matching entry."
                         }
@@ -145,33 +155,22 @@ private fun MiitApp() {
                 },
                 onOpenAuthKeyHelp = { showAuthKeyHelp = true }
             )
-
             MiitScreen.BAND -> connectedBand?.let { band ->
                 BandScreen(
                     band = band,
                     onSettings = { showSettings = true },
-                    onEdit = { display ->
-                        editingDisplay = display
-                        screen = MiitScreen.EDITOR
-                    },
-                    onCustomDisplay = {
-                        editingDisplay = null
-                        screen = MiitScreen.EDITOR
-                    }
+                    onEdit = { display -> editingDisplay = display; screen = MiitScreen.EDITOR },
+                    onCustomDisplay = { editingDisplay = null; screen = MiitScreen.EDITOR }
                 )
             }
-
             MiitScreen.EDITOR -> EditorScreen(
                 display = editingDisplay,
                 device = connectedBand,
                 onBack = { screen = MiitScreen.BAND },
                 onAction = { action ->
                     when (action) {
-                        "save" -> {
-                            prefs.edit().putString("last_display", editingDisplay?.stableId ?: "Custom display").apply()
-                            Toast.makeText(context, "Project saved on this phone.", Toast.LENGTH_SHORT).show()
-                        }
-                        "share" -> Toast.makeText(context, "Sharing will be wired to the project package.", Toast.LENGTH_SHORT).show()
+                        "save" -> Toast.makeText(context, "Project saved on this phone.", Toast.LENGTH_SHORT).show()
+                        "share" -> Toast.makeText(context, "Project sharing will be wired to the package exporter.", Toast.LENGTH_SHORT).show()
                         "export" -> Toast.makeText(context, "Export packaging is the next compiler step.", Toast.LENGTH_SHORT).show()
                         "band" -> Toast.makeText(context, "Direct installation is not implemented yet; no false success shown.", Toast.LENGTH_LONG).show()
                     }
@@ -179,24 +178,16 @@ private fun MiitApp() {
             )
         }
 
-        FloatingLogButton(
-            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).zIndex(10f)
-        )
+        FloatingLogButton(Modifier.align(Alignment.BottomEnd).padding(16.dp).zIndex(10f))
     }
 
     if (showAuthKeyHelp) AuthKeyInstructionsDialog(onDismiss = { showAuthKeyHelp = false })
-    if (authCandidates.size > 1) {
-        AuthKeyCandidatesDialog(
-            candidates = authCandidates,
-            onSelect = { candidate ->
-                authKeyText = candidate.key
-                prefs.edit().putString("auth_key", candidate.key).apply()
-                authCandidates = emptyList()
-                authSearchStatus = "Auth key selected ✓"
-            },
-            onDismiss = { authCandidates = emptyList() }
-        )
-    }
+    if (authCandidates.size > 1) AuthKeyCandidatesDialog(authCandidates, {
+        authKeyText = it.key
+        prefs.edit().putString("auth_key", it.key).apply()
+        authCandidates = emptyList()
+        authSearchStatus = "Auth key selected ✓"
+    }, { authCandidates = emptyList() })
     if (showSettings) SettingsDialog(onDismiss = { showSettings = false })
 }
 
@@ -218,45 +209,36 @@ private fun ConnectionScreen(
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Connection", style = androidx.compose.material3.MaterialTheme.typography.headlineSmall)
+                        Text("Connection", style = MaterialTheme.typography.headlineSmall)
                         Text(connectionInstruction(state))
-                        Button(onClick = onFindAuthKey, enabled = state != BandConnectionState.Connecting && state != BandConnectionState.Authenticating, modifier = Modifier.fillMaxWidth()) {
-                            Text("Get auth key from Mi Fitness")
-                        }
-                        authSearchStatus?.let { Text(it, style = androidx.compose.material3.MaterialTheme.typography.bodySmall) }
-                        OutlinedButton(onClick = onOpenAuthKeyHelp, Modifier.fillMaxWidth()) { Text("How to find it from your phone") }
+                        Button(onClick = onFindAuthKey, modifier = Modifier.fillMaxWidth()) { Text("Get auth key from Mi Fitness") }
+                        authSearchStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                        OutlinedButton(onClick = onOpenAuthKeyHelp, Modifier.fillMaxWidth()) { Text("How to find it") }
                         HorizontalDivider()
-                        Text("Manual fallback", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+                        Text("Manual fallback", style = MaterialTheme.typography.titleMedium)
                         OutlinedTextField(
                             value = authKeyText,
                             onValueChange = onAuthKeyChange,
                             modifier = Modifier.fillMaxWidth(),
                             label = { Text("Xiaomi auth key") },
-                            supportingText = { Text("32 hexadecimal characters. Stored only on this phone.") },
+                            supportingText = { Text("32 hexadecimal characters") },
                             visualTransformation = PasswordVisualTransformation(),
                             singleLine = true
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { scanner.startScan() }, enabled = state != BandConnectionState.Connecting && state != BandConnectionState.Authenticating) {
-                                Text(if (state == BandConnectionState.Scanning) "Scanning…" else "Scan for band")
-                            }
+                            Button(onClick = { scanner.startScan() }) { Text(if (state == BandConnectionState.Scanning) "Scanning…" else "Scan for band") }
                             if (state == BandConnectionState.Scanning) OutlinedButton(onClick = { scanner.stopScan() }) { Text("Stop") }
                         }
                     }
                 }
             }
-
             if (devices.isNotEmpty()) {
-                item { Text("Nearby Xiaomi bands", style = androidx.compose.material3.MaterialTheme.typography.titleLarge) }
+                item { Text("Nearby Xiaomi bands", style = MaterialTheme.typography.titleLarge) }
                 items(devices, key = { it.address }) { device ->
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(device.name, style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
-                            Text(when {
-                                device.authenticated -> "✓ Connected and authenticated"
-                                device.connected -> "Connected"
-                                else -> "Available"
-                            })
+                            Text(device.name, style = MaterialTheme.typography.titleMedium)
+                            Text(if (device.authenticated) "✓ Connected and authenticated" else if (device.connected) "Connected" else "Available")
                             Text("Signal: ${device.rssi} dBm")
                             Button(onClick = {
                                 val key = AuthKeyParser.parse(authKeyText)
@@ -279,19 +261,14 @@ private fun BandScreen(
     onEdit: (BandDisplay) -> Unit,
     onCustomDisplay: () -> Unit
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(band.name) },
-                actions = { IconButton(onClick = onSettings) { Text("⚙", fontSize = 22.sp) } }
-            )
-        }
-    ) { padding ->
+    Scaffold(topBar = {
+        TopAppBar(title = { Text(band.name) }, actions = { IconButton(onClick = onSettings) { Text("⚙", fontSize = 22.sp) } })
+    }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                        Text("Band information", style = androidx.compose.material3.MaterialTheme.typography.titleLarge)
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Band information", style = MaterialTheme.typography.titleLarge)
                         Text(buildList {
                             band.model?.let { add("Model: $it") }
                             band.firmware?.let { add("Firmware: $it") }
@@ -302,36 +279,28 @@ private fun BandScreen(
                     }
                 }
             }
-
             item {
-                Text("Band screens", style = androidx.compose.material3.MaterialTheme.typography.titleLarge)
-                Text("These are menu/system items reported by the Band. They are metadata, not watchface image files.", color = Color.Gray, fontSize = 12.sp)
+                Text("Band screens", style = MaterialTheme.typography.titleLarge)
+                Text("System/menu items reported by the Band. They are not watchface image files.", color = Color.Gray, fontSize = 12.sp)
             }
-
-            if (band.displays.isEmpty()) {
-                item { Text("No Band screen metadata received yet.", color = Color.Gray) }
-            } else {
-                items(band.displays, key = { it.stableId }) { display -> BandMenuItemCard(display) }
-            }
+            if (band.displays.isEmpty()) item { Text("No Band screen metadata received yet.", color = Color.Gray) }
+            else items(band.displays, key = { it.stableId }) { BandMenuItemCard(it) }
 
             item {
                 Spacer(Modifier.height(8.dp))
-                Text("Watch faces", style = androidx.compose.material3.MaterialTheme.typography.titleLarge)
-                Text("Only actual watchface inventory entries are editable here. MIIT will not substitute demo data for a Band resource.", color = Color.Gray, fontSize = 12.sp)
+                Text("Watch faces", style = MaterialTheme.typography.titleLarge)
+                Text("Only watchface inventory entries are editable. No demo face is substituted for a missing Band resource.", color = Color.Gray, fontSize = 12.sp)
             }
-
             if (band.watchfaces.isEmpty()) {
                 item {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("No watchface inventory received", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
-                            Text("The current connection layer can identify menu items; visual watchface resources will require the watchface download/resource protocol before they can be previewed faithfully.", color = Color.Gray, fontSize = 12.sp)
+                            Text("No watchface inventory received", style = MaterialTheme.typography.titleMedium)
+                            Text("Visual resources require the watchface download/resource protocol before a faithful preview can be shown.", color = Color.Gray, fontSize = 12.sp)
                         }
                     }
                 }
-            } else {
-                items(band.watchfaces, key = { it.stableId }) { display -> RuntimeWatchfaceCard(display, onEdit) }
-            }
+            } else items(band.watchfaces, key = { it.stableId }) { RuntimeWatchfaceCard(it, onEdit) }
 
             item { Button(onClick = onCustomDisplay, Modifier.fillMaxWidth()) { Text("＋ Create new watch face") } }
         }
@@ -343,8 +312,8 @@ private fun BandMenuItemCard(display: BandDisplay) {
     val name = display.name?.takeIf { it.isNotBlank() } ?: display.code?.takeIf { it.isNotBlank() } ?: "Unnamed screen"
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(name, style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
-            display.code?.takeIf { it.isNotBlank() }?.let { Text("Code: $it", color = Color.Gray, fontSize = 11.sp) }
+            Text(name, style = MaterialTheme.typography.titleMedium)
+            display.code?.let { Text("Code: $it", color = Color.Gray, fontSize = 11.sp) }
             val flags = buildList {
                 if (display.active) add("Current")
                 if (display.inMoreSection) add("More")
@@ -364,8 +333,8 @@ private fun RuntimeWatchfaceCard(display: BandDisplay, onEdit: (BandDisplay) -> 
                 Text("No image", color = Color.Gray, fontSize = 10.sp)
             }
             Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(name, style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(name, style = MaterialTheme.typography.titleMedium)
                 display.code?.let { Text(it, color = Color.Gray, fontSize = 11.sp) }
                 if (display.active) Text("Current watch face", color = Color(0xFF55D8C7), fontSize = 11.sp)
                 OutlinedButton(onClick = { onEdit(display) }) { Text("Edit") }
@@ -375,43 +344,69 @@ private fun RuntimeWatchfaceCard(display: BandDisplay, onEdit: (BandDisplay) -> 
 }
 
 @Composable
+private fun EditorScreen(display: BandDisplay?, device: BandDevice?, onBack: () -> Unit, onAction: (String) -> Unit) =
+    MiitWatchFaceEditor(display, device, onBack, onAction)
+
+@Composable
 private fun AuthKeyInstructionsDialog(onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Find the auth key from Mi Fitness") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                Text("1. Keep your Band paired with the official Mi Fitness app.")
-                Text("2. Open Mi Fitness → Profile → About this app.")
-                Text("3. Repeatedly tap the Mi Fitness logo to create the wearable log export.")
-                Text("4. The export normally appears under Download/wearablelog/ as a ZIP such as 1788456025701log.zip.")
-                Text("5. MIIT first searches that wearablelog ZIP and its log files for token/authKey/encryptKey values.")
-                Text("The Xiaomi account password is never requested by MIIT.")
-            }
-        },
-        confirmButton = { OutlinedButton(onClick = onDismiss) { Text("Done") } }
-    )
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Find the auth key from Mi Fitness") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text("1. Open Mi Fitness → Profile → About this app.")
+            Text("2. Repeatedly tap the Mi Fitness logo to create the wearable log export.")
+            Text("3. The usual export is Download/wearablelog/<timestamp>log.zip.")
+            Text("4. MIIT looks inside that ZIP and its log files for token/authKey/encryptKey values.")
+            Text("5. Manual fallback remains available when Android does not expose the export automatically.")
+        }
+    }, confirmButton = { Button(onClick = onDismiss) { Text("Done") } })
 }
 
 @Composable
-private fun AuthKeyCandidatesDialog(
-    candidates: List<MiFitnessAuthKeyExtractor.Candidate>,
-    onSelect: (MiFitnessAuthKeyExtractor.Candidate) -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Choose the Mi Fitness key") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                candidates.forEachIndexed { index, candidate ->
-                    OutlinedButton(onClick = { onSelect(candidate) }, Modifier.fillMaxWidth()) {
-                        Text("Candidate ${index + 1}\n${candidate.source.take(90)}")
-                    }
-                }
-                Text("The complete key is not displayed in the chooser.", color = Color.Gray)
+private fun AuthKeyCandidatesDialog(candidates: List<MiFitnessAuthKeyExtractor.Candidate>, onSelect: (MiFitnessAuthKeyExtractor.Candidate) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Choose the Mi Fitness key") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            candidates.forEachIndexed { index, candidate ->
+                OutlinedButton(onClick = { onSelect(candidate) }, Modifier.fillMaxWidth()) { Text("Candidate ${index + 1}\n${candidate.source.take(90)}") }
             }
-        },
-        confirmButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } }
-    )
+            Text("The complete key is kept hidden.", color = Color.Gray)
+        }
+    }, confirmButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } })
+}
+
+@Composable
+private fun SettingsDialog(onDismiss: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Miit settings") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Editor: device-aware watchface authoring")
+            Text("Band values are read from runtime discovery")
+            Text("Authentication keys stay on this phone")
+        }
+    }, confirmButton = { Button(onClick = onDismiss) { Text("Done") } })
+}
+
+@Composable
+private fun FloatingLogButton(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    Box(modifier.offset { IntOffset(offset.x.roundToInt(), offset.y.roundToInt()) }.pointerInput(Unit) {
+        detectDragGestures { change, amount -> change.consume(); offset += amount }
+    }) {
+        FloatingActionButton(onClick = {
+            val log = MiitTestLog.text(context)
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("Miit testing logs", log))
+            Toast.makeText(context, "Testing log copied.", Toast.LENGTH_LONG).show()
+        }, shape = RectangleShape) { Text("LOG", fontWeight = FontWeight.Bold) }
+    }
+}
+
+private fun connectionInstruction(state: BandConnectionState): String = when (state) {
+    BandConnectionState.Idle -> "Get the auth key from Mi Fitness first, or enter it manually, then scan for the Band."
+    BandConnectionState.Scanning -> "Keep the Band nearby and awake, then select it from the list."
+    BandConnectionState.Connecting -> "Complete Android pairing and wait for Xiaomi authentication."
+    BandConnectionState.Connected -> "Bluetooth transport connected; authentication is continuing."
+    BandConnectionState.AwaitingXiaomiBinding -> "Android pairing is complete; Xiaomi binding is continuing."
+    BandConnectionState.Authenticating -> "Authenticating with the Band… please wait."
+    BandConnectionState.Authenticated -> "Connection complete. Runtime Band data is being collected."
+    BandConnectionState.Disconnected -> "The Band disconnected. Scan and connect again."
+    BandConnectionState.Error -> "Connection failed. Check the auth key and try again."
 }
