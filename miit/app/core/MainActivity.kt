@@ -64,6 +64,10 @@ import com.miit.app.band.BandDevice
 import com.miit.app.band.BandDisplay
 import com.miit.app.band.BandScanner
 import com.miit.app.band.MiitTestLog
+import com.miit.app.band.MiFitnessAuthKeyExtractor
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 private enum class MiitScreen { CONNECTION, BAND, EDITOR }
@@ -107,6 +111,9 @@ private fun MiitApp() {
     var showSettings by remember { mutableStateOf(false) }
     var showAuthKeyHelp by remember { mutableStateOf(false) }
     var editingDisplay by remember { mutableStateOf<BandDisplay?>(null) }
+    var authSearchStatus by remember { mutableStateOf<String?>(null) }
+    var authCandidates by remember { mutableStateOf<List<MiFitnessAuthKeyExtractor.Candidate>>(emptyList()) }
+    val scope = rememberCoroutineScope()
 
     val authenticatedDevice = devices.firstOrNull { it.authenticated }
 
@@ -139,6 +146,23 @@ private fun MiitApp() {
                 onAuthKeyChange = {
                     authKeyText = it
                     prefs.edit().putString("auth_key", it.trim()).apply()
+                },
+                authSearchStatus = authSearchStatus,
+                onFindAuthKey = {
+                    authSearchStatus = "Searching Mi Fitness data on this phone…"
+                    scope.launch {
+                        val found = withContext(Dispatchers.IO) { MiFitnessAuthKeyExtractor.find(context) }
+                        authCandidates = found
+                        authSearchStatus = when {
+                            found.isEmpty() -> "No usable Mi Fitness auth key was found. You can enter it manually."
+                            found.size == 1 -> "Auth key found in Mi Fitness data ✓"
+                            else -> "Multiple possible keys found. Choose the matching entry below."
+                        }
+                        if (found.size == 1) {
+                            authKeyText = found.first().key
+                            prefs.edit().putString("auth_key", found.first().key).apply()
+                        }
+                    }
                 },
                 onOpenAuthKeyHelp = { showAuthKeyHelp = true }
             )
@@ -199,6 +223,19 @@ private fun MiitApp() {
     if (showAuthKeyHelp) {
         AuthKeyInstructionsDialog(onDismiss = { showAuthKeyHelp = false })
     }
+    if (authCandidates.size > 1) {
+        AuthKeyCandidatesDialog(
+            candidates = authCandidates,
+            onSelect = { candidate ->
+                authKeyText = candidate.key
+                prefs.edit().putString("auth_key", candidate.key).apply()
+                authCandidates = emptyList()
+                authSearchStatus = "Auth key selected ✓"
+            },
+            onDismiss = { authCandidates = emptyList() }
+        )
+    }
+
     if (showSettings) {
         SettingsDialog(onDismiss = { showSettings = false })
     }
@@ -212,6 +249,8 @@ private fun ConnectionScreen(
     state: BandConnectionState,
     authKeyText: String,
     onAuthKeyChange: (String) -> Unit,
+    authSearchStatus: String?,
+    onFindAuthKey: () -> Unit,
     onOpenAuthKeyHelp: () -> Unit
 ) {
     val context = LocalContext.current
@@ -225,9 +264,22 @@ private fun ConnectionScreen(
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Connection", style = MaterialTheme.typography.headlineSmall)
                         Text(connectionInstruction(state))
-                        OutlinedButton(onClick = onOpenAuthKeyHelp, Modifier.fillMaxWidth()) {
-                            Text("How to find the auth key")
+                        Button(
+                            onClick = onFindAuthKey,
+                            enabled = state != BandConnectionState.Connecting &&
+                                state != BandConnectionState.Authenticating,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Get auth key from Mi Fitness")
                         }
+                        authSearchStatus?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall)
+                        }
+                        OutlinedButton(onClick = onOpenAuthKeyHelp, Modifier.fillMaxWidth()) {
+                            Text("How to find it from your phone")
+                        }
+                        HorizontalDivider()
+                        Text("Manual fallback", style = MaterialTheme.typography.titleMedium)
                         OutlinedTextField(
                             value = authKeyText,
                             onValueChange = onAuthKeyChange,
@@ -427,14 +479,15 @@ private fun EditorScreen(
 private fun AuthKeyInstructionsDialog(onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Find your Xiaomi auth key") },
+        title = { Text("Find the auth key from your phone") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("1. Open Gadgetbridge and open your Xiaomi Band device.")
-                Text("2. Open the device's pairing or authentication details. The label can vary by Gadgetbridge version.")
-                Text("3. Copy the 32-character hexadecimal authentication key into Miit.")
-                Text("4. If your pairing flow uses a QR/key exchange, use the Gadgetbridge pairing screen to obtain the authentication value.")
-                Text("The key is specific to each device. Do not share it publicly.")
+                Text("1. Pair your Xiaomi Band with the official Mi Fitness app.")
+                Text("2. In Mi Fitness, open Profile → About this app.")
+                Text("3. Repeatedly tap the Mi Fitness logo to create diagnostic/registration data.")
+                Text("4. Return to Miit and tap “Get auth key from Mi Fitness”.")
+                Text("5. Miit searches Mi Fitness data in the phone's Downloads/log locations. It does not need your Xiaomi password.")
+                Text("If Android does not expose the Mi Fitness data, use the Manual fallback and enter the 32-character hexadecimal auth key.")
             }
         },
         confirmButton = { Button(onClick = onDismiss) { Text("Done") } }
@@ -442,6 +495,31 @@ private fun AuthKeyInstructionsDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
+private fun AuthKeyCandidatesDialog(
+    candidates: List<MiFitnessAuthKeyExtractor.Candidate>,
+    onSelect: (MiFitnessAuthKeyExtractor.Candidate) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Choose the Mi Fitness key") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                candidates.forEachIndexed { index, candidate ->
+                    OutlinedButton(
+                        onClick = { onSelect(candidate) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Candidate " + (index + 1) + "\n" + candidate.source.take(80))
+                    }
+                }
+                Text("The full key is kept hidden until you choose it.")
+            }
+        },
+        confirmButton = { Button(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
 private fun SettingsDialog(onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
