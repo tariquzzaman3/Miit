@@ -11,7 +11,7 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.companion.AssociationRequest
 import android.companion.BluetoothDeviceFilter
-import android.bluetooth.le.BluetoothLeDeviceFilter
+import android.companion.BluetoothLeDeviceFilter
 import android.companion.CompanionDeviceManager
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -162,7 +162,6 @@ class BandScanner(context: Context) {
             BluetoothDeviceFilter.Builder().setAddress(device.address).build()
         else BluetoothLeDeviceFilter.Builder().setScanFilter(ScanFilter.Builder().setDeviceAddress(device.address).build()).build()
         val request = AssociationRequest.Builder().addDeviceFilter(filter).setSingleDevice(true).build()
-        MiitTestLog.add("Xiaomi pairing: requesting Android Companion confirmation")
         runCatching {
             manager.associate(request, object : CompanionDeviceManager.Callback() {
                 override fun onDeviceFound(chooserLauncher: android.content.IntentSender) {
@@ -240,11 +239,9 @@ class BandScanner(context: Context) {
     private fun updateData(address: String, update: BandDataUpdate) {
         _devices.value = _devices.value.map { item ->
             if (!item.address.equals(address, true)) return@map item
-
             val incoming = update.displays.orEmpty()
             val incomingMenu = incoming.filter { it.source == BandDisplay.Source.DISPLAY_ITEM }
-            val incomingWatchfaces = (update.watchfaces.orEmpty() + incoming.filter { it.source == BandDisplay.Source.WATCHFACE })
-
+            val incomingWatchfaces = update.watchfaces.orEmpty() + incoming.filter { it.source == BandDisplay.Source.WATCHFACE }
             item.copy(
                 model = update.model ?: item.model,
                 firmware = update.firmware ?: item.firmware,
