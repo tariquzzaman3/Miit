@@ -2,7 +2,6 @@ package com.miit.app
 
 import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -10,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,21 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -47,30 +34,36 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.miit.app.band.BandDisplay
 import com.miit.app.band.BandDevice
+import com.miit.app.band.BandDisplay
+
+private enum class ToolCategory(val icon: String, val title: String) {
+    ADD("＋", "Add"),
+    TEXT("T", "Text"),
+    DATA("◉", "Data"),
+    SHAPE("○", "Shape"),
+    MEDIA("▣", "Media"),
+    LAYERS("≡", "Layers"),
+    AOD("☾", "AOD")
+}
 
 private enum class EditorElementType {
-    TIME, DATE, WEEKDAY, HEART_RATE, SPO2, STEPS, BATTERY, RELAXATION,
-    CALORIES, DISTANCE, SLEEP, WEATHER, TEXT, IMAGE, CIRCLE_PROGRESS, BAR_PROGRESS
+    TIME, DATE, WEEKDAY, HEART_RATE, SPO2, STEPS, BATTERY, CALORIES,
+    DISTANCE, SLEEP, WEATHER, TEXT, CIRCLE, RECTANGLE, LINE, ARC, IMAGE
 }
 
 private data class EditorElement(
     val id: Int,
     val type: EditorElementType,
-    val label: String,
     val preview: String,
-    val format: String = "",
-    val size: Int = 20,
-    val x: Int = 50,
-    val y: Int = 50,
+    val x: Float = 50f,
+    val y: Float = 50f,
+    val size: Float = 24f,
     val color: Color = Color.White,
     val visible: Boolean = true,
-    val locked: Boolean = false,
-    val alignment: String = "Center"
+    val locked: Boolean = false
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MiitWatchFaceEditor(
     display: BandDisplay?,
@@ -78,432 +71,372 @@ fun MiitWatchFaceEditor(
     onBack: () -> Unit,
     onAction: (String) -> Unit
 ) {
-    val elements = remember {
-        mutableStateListOf(
-            EditorElement(1, EditorElementType.TIME, "Time", "12:45", "HH:mm", 36, 50, 35),
-            EditorElement(2, EditorElementType.DATE, "Date", "03 Sep", "DD MMM", 16, 50, 48),
-            EditorElement(3, EditorElementType.STEPS, "Steps", "6,421", "Steps", 16, 50, 62)
-        )
-    }
-    var nextId by remember { mutableIntStateOf(4) }
-    var selectedId by remember { mutableIntStateOf(1) }
-    var tab by remember { mutableStateOf("Elements") }
-    var addOpen by remember { mutableStateOf(false) }
-    var propertiesOpen by remember { mutableStateOf(true) }
-    var previewMode by remember { mutableStateOf(false) }
-    var storeCheckOpen by remember { mutableStateOf(false) }
-    var aodEnabled by remember { mutableStateOf(false) }
-    var zoom by remember { mutableStateOf("Fit") }
-
-    val selected = elements.firstOrNull { it.id == selectedId }
     val context = LocalContext.current
-    val profile = remember(device?.model, device?.name) { DeviceProfileResolver.resolve(device?.model ?: device?.name) }
+    val profile = remember(device?.model, device?.name) { resolveProfile(device) }
+    val elements = remember(display?.stableId) {
+        mutableStateListOf<EditorElement>().apply {
+            // Never fabricate data over an existing band watchface/menu item.
+            // New projects may start with a small editable starter face.
+            if (display == null) {
+                add(EditorElement(1, EditorElementType.TIME, "12:45", 50f, 34f, 38f))
+                add(EditorElement(2, EditorElementType.DATE, "03 Sep", 50f, 48f, 16f))
+                add(EditorElement(3, EditorElementType.STEPS, "6,421", 50f, 61f, 16f))
+            }
+        }
+    }
+    var nextId by remember(display?.stableId) { mutableIntStateOf(elements.maxOfOrNull { it.id }?.plus(1) ?: 1) }
+    var selectedId by remember { mutableIntStateOf(elements.firstOrNull()?.id ?: 0) }
+    var selectedTool by remember { mutableStateOf(ToolCategory.ADD) }
+    var previewMode by remember { mutableStateOf(false) }
+    var aodEnabled by remember { mutableStateOf(false) }
 
-    fun add(type: EditorElementType, preview: String) {
+    fun addElement(type: EditorElementType, preview: String) {
         val id = nextId++
-        elements.add(EditorElement(id, type, type.name.replace('_', ' '), preview, if (type == EditorElementType.TIME) "HH:mm" else "", 18))
+        elements += EditorElement(id, type, preview, 50f, 50f, if (type == EditorElementType.TIME) 36f else 18f)
         selectedId = id
-        addOpen = false
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(display?.name ?: "New watch face") },
-                navigationIcon = { IconButton(onClick = onBack) { Text("‹", fontSize = 30.sp) } },
-                actions = {
-                    OutlinedButton(onClick = { previewMode = !previewMode }) { Text(if (previewMode) "Edit" else "Preview") }
-                    IconButton(onClick = { onAction("save") }) { Text("✓") }
+    if (previewMode) {
+        FullPreview(
+            elements = elements,
+            profile = profile,
+            aod = aodEnabled,
+            onBack = { previewMode = false }
+        )
+        return
+    }
+
+    Column(Modifier.fillMaxSize().background(Color(0xFF101114))) {
+        // Minimal editor header: icon-first, no Material button/card treatment.
+        Row(
+            Modifier.fillMaxWidth().height(52.dp).background(Color(0xFF18191D)).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            ToolGlyph("‹", "Back", onBack)
+            Text(
+                display?.name?.takeIf { it.isNotBlank() } ?: "New watch face",
+                color = Color.White,
+                fontSize = 15.sp,
+                maxLines = 1,
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                ToolGlyph("⌁", "Preview") { previewMode = true }
+                ToolGlyph("✓", "Save") {
+                    WatchfaceProjectStore.save(
+                        context,
+                        display?.name ?: "MIIT watch face",
+                        profile.width,
+                        profile.height,
+                        aodEnabled,
+                        serializeElements(elements)
+                    )
+                    Toast.makeText(context, "Project saved on this phone.", Toast.LENGTH_SHORT).show()
+                    onAction("save")
+                }
+            }
+        }
+
+        // BAR 1 — main tools, horizontally swipeable.
+        HorizontalToolBar(
+            selected = selectedTool,
+            onSelect = { selectedTool = it },
+            modifier = Modifier.fillMaxWidth().height(66.dp)
+        )
+
+        // BAR 2 — contextual sub-tools, horizontally swipeable.
+        SubToolBar(
+            category = selectedTool,
+            aodEnabled = aodEnabled,
+            onAodChange = { aodEnabled = it },
+            onAdd = ::addElement,
+            onLayerAction = { action ->
+                val selected = elements.indexOfFirst { it.id == selectedId }
+                if (selected < 0) return@SubToolBar
+                when (action) {
+                    "hide" -> elements[selected] = elements[selected].copy(visible = !elements[selected].visible)
+                    "lock" -> elements[selected] = elements[selected].copy(locked = !elements[selected].locked)
+                    "delete" -> {
+                        elements.removeAt(selected)
+                        selectedId = elements.firstOrNull()?.id ?: 0
+                    }
+                    "front" -> {
+                        val item = elements.removeAt(selected)
+                        elements += item
+                    }
+                    "back" -> {
+                        val item = elements.removeAt(selected)
+                        elements.add(0, item)
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth().height(58.dp)
+        )
+
+        // MIDDLE — actual editor display.
+        Box(Modifier.fillMaxSize().weight(1f)) {
+            WatchCanvasV2(
+                elements = elements,
+                selectedId = selectedId,
+                profile = profile,
+                metadataOnly = display != null,
+                onSelect = { selectedId = it },
+                onMove = { id, dx, dy ->
+                    val index = elements.indexOfFirst { it.id == id }
+                    if (index >= 0 && !elements[index].locked) {
+                        val current = elements[index]
+                        elements[index] = current.copy(
+                            x = (current.x + dx).coerceIn(0f, 100f),
+                            y = (current.y + dy).coerceIn(0f, 100f)
+                        )
+                    }
                 }
             )
         }
-    ) { padding ->
-        if (previewMode) {
-            EditorPreview(elements, aodEnabled, onBack = { previewMode = false })
-        } else {
-            Column(Modifier.fillMaxSize().padding(padding)) {
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    listOf("Elements", "Layers", "Design", "Device", "Validate").forEach { item ->
-                        if (tab == item) Button(onClick = { tab = item }) { Text(item) }
-                        else OutlinedButton(onClick = { tab = item }) { Text(item) }
-                    }
-                }
 
-                if (tab == "Device") {
-                    DeviceProfilePanel(aodEnabled) { aodEnabled = it }
-                } else if (tab == "Validate") {
-                    ValidationPanel(
-                        elements = elements,
-                        onStoreCheck = { storeCheckOpen = true },
-                        onExport = { onAction("export") }
-                    )
-                } else {
-                    Row(Modifier.fillMaxWidth().weight(1f)) {
-                        Column(
-                            Modifier.weight(1f).fillMaxSize().padding(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Canvas • \${profile.width} × \${profile.height} px • \${profile.source}", style = MaterialTheme.typography.labelMedium)
-                                OutlinedButton(onClick = {
-                                    zoom = if (zoom == "Fit") "100%" else "Fit"
-                                }) { Text(zoom) }
-                            }
-                            WatchCanvas(elements, selectedId, onSelect = { selectedId = it }, onMove = { id, dx, dy ->
-                                val index = elements.indexOfFirst { it.id == id }
-                                if (index >= 0 && !elements[index].locked) {
-                                    val e = elements[index]
-                                    elements[index] = e.copy(x = (e.x + dx).coerceIn(0, 100), y = (e.y + dy).coerceIn(0, 100))
-                                }
-                            })
-                        }
-
-                        if (propertiesOpen && selected != null) {
-                            EditorProperties(
-                                element = selected,
-                                onChange = { updated ->
-                                    val index = elements.indexOfFirst { it.id == updated.id }
-                                    if (index >= 0) elements[index] = updated
-                                },
-                                onDelete = {
-                                    elements.removeAll { it.id == selected.id }
-                                    selectedId = elements.firstOrNull()?.id ?: 0
-                                },
-                                onClose = { propertiesOpen = false }
-                            )
-                        }
-                    }
-
-                    Row(
-                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Button(onClick = { addOpen = true }) { Text("+ Element") }
-                        OutlinedButton(onClick = { propertiesOpen = !propertiesOpen }) { Text("Properties") }
-                        OutlinedButton(onClick = {
-                            WatchfaceProjectStore.save(context, display?.name ?: "MIIT watch face", profile.width, profile.height, aodEnabled, serializeElements(elements))
-                            Toast.makeText(context, "Project saved on this phone.", Toast.LENGTH_SHORT).show()
-                            onAction("save")
-                        }) { Text("Save") }
-                        OutlinedButton(onClick = { onAction("share") }) { Text("Share") }
-                        OutlinedButton(onClick = { onAction("band") }) { Text("Set on Band") }
-                        OutlinedButton(onClick = { storeCheckOpen = true }) { Text("Store check") }
-                    }
-
-                    if (tab == "Layers") {
-                        LayerPanel(elements, selectedId, { selectedId = it }, { id ->
-                            val i = elements.indexOfFirst { it.id == id }
-                            if (i >= 0) elements[i] = elements[i].copy(visible = !elements[i].visible)
-                        })
-                    }
-                }
-            }
-        }
-    }
-
-    if (addOpen) {
-        AddElementDialog(
-            onDismiss = { addOpen = false },
-            onAdd = ::add
-        )
-    }
-    if (storeCheckOpen) {
-        StoreCheckDialog(
-            elements = elements,
-            onDismiss = { storeCheckOpen = false },
-            onExport = {
-                storeCheckOpen = false
-                onAction("export")
-            }
+        // Lightweight selected-element strip; still icon-first.
+        SelectedElementBar(
+            selected = elements.firstOrNull { it.id == selectedId },
+            onChangeSize = { delta ->
+                val index = elements.indexOfFirst { it.id == selectedId }
+                if (index >= 0) elements[index] = elements[index].copy(size = (elements[index].size + delta).coerceIn(10f, 72f))
+            },
+            onDelete = {
+                elements.removeAll { it.id == selectedId }
+                selectedId = elements.firstOrNull()?.id ?: 0
+            },
+            onExport = { onAction("export") },
+            onBand = { onAction("band") }
         )
     }
 }
 
 @Composable
-private fun WatchCanvas(elements: List<EditorElement>, selectedId: Int, onSelect: (Int) -> Unit, onMove: (Int, Int, Int) -> Unit = { _, _, _ -> }) {
+private fun HorizontalToolBar(
+    selected: ToolCategory,
+    onSelect: (ToolCategory) -> Unit,
+    modifier: Modifier
+) {
+    Row(
+        modifier.background(Color(0xFF202126)).horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        ToolCategory.values().forEach { tool ->
+            ToolCell(tool.icon, tool.title, selected == tool, onClick = { onSelect(tool) })
+        }
+    }
+}
+
+@Composable
+private fun SubToolBar(
+    category: ToolCategory,
+    aodEnabled: Boolean,
+    onAodChange: (Boolean) -> Unit,
+    onAdd: (EditorElementType, String) -> Unit,
+    onLayerAction: (String) -> Unit,
+    modifier: Modifier
+) {
+    val items = when (category) {
+        ToolCategory.ADD -> listOf(
+            SubAction("◷", "Time") { onAdd(EditorElementType.TIME, "12:45") },
+            SubAction("D", "Date") { onAdd(EditorElementType.DATE, "03 Sep") },
+            SubAction("♥", "Heart") { onAdd(EditorElementType.HEART_RATE, "72") },
+            SubAction("O₂", "SpO₂") { onAdd(EditorElementType.SPO2, "98%") },
+            SubAction("↟", "Steps") { onAdd(EditorElementType.STEPS, "6,421") },
+            SubAction("▣", "Battery") { onAdd(EditorElementType.BATTERY, "86%") },
+            SubAction("Cal", "Calories") { onAdd(EditorElementType.CALORIES, "482") },
+            SubAction("↗", "Distance") { onAdd(EditorElementType.DISTANCE, "4.8") }
+        )
+        ToolCategory.TEXT -> listOf(
+            SubAction("T", "Text") { onAdd(EditorElementType.TEXT, "Custom text") },
+            SubAction("D", "Date") { onAdd(EditorElementType.DATE, "03 Sep") },
+            SubAction("W", "Weekday") { onAdd(EditorElementType.WEEKDAY, "Thu") }
+        )
+        ToolCategory.DATA -> listOf(
+            SubAction("♥", "Heart") { onAdd(EditorElementType.HEART_RATE, "72") },
+            SubAction("O₂", "SpO₂") { onAdd(EditorElementType.SPO2, "98%") },
+            SubAction("↟", "Steps") { onAdd(EditorElementType.STEPS, "6,421") },
+            SubAction("☾", "Sleep") { onAdd(EditorElementType.SLEEP, "7h 32m") },
+            SubAction("⌂", "Weather") { onAdd(EditorElementType.WEATHER, "28°") },
+            SubAction("▣", "Battery") { onAdd(EditorElementType.BATTERY, "86%") }
+        )
+        ToolCategory.SHAPE -> listOf(
+            SubAction("○", "Circle") { onAdd(EditorElementType.CIRCLE, "○") },
+            SubAction("□", "Rect") { onAdd(EditorElementType.RECTANGLE, "□") },
+            SubAction("／", "Line") { onAdd(EditorElementType.LINE, "—") },
+            SubAction("◔", "Arc") { onAdd(EditorElementType.ARC, "◔") }
+        )
+        ToolCategory.MEDIA -> listOf(SubAction("▧", "Image") { onAdd(EditorElementType.IMAGE, "Image") })
+        ToolCategory.LAYERS -> listOf(
+            SubAction("↑", "Front") { onLayerAction("front") },
+            SubAction("↓", "Back") { onLayerAction("back") },
+            SubAction("◉", "Show") { onLayerAction("hide") },
+            SubAction("⌑", "Lock") { onLayerAction("lock") },
+            SubAction("×", "Delete") { onLayerAction("delete") }
+        )
+        ToolCategory.AOD -> listOf(SubAction(if (aodEnabled) "●" else "○", if (aodEnabled) "AOD on" else "AOD off") { onAodChange(!aodEnabled) })
+    }
+
+    Row(
+        modifier.background(Color(0xFF17181B)).horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items.forEach { action ->
+            ToolCell(action.icon, action.title, false, action.onClick)
+        }
+    }
+}
+
+private data class SubAction(val icon: String, val title: String, val onClick: () -> Unit)
+
+@Composable
+private fun ToolGlyph(icon: String, description: String, onClick: () -> Unit) {
     Box(
-        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
+        Modifier.size(38.dp).pointerInput(description) {
+            detectDragGestures(
+                onDragStart = { onClick() },
+                onDrag = { change, _ -> change.consume() }
+            )
+        },
         contentAlignment = Alignment.Center
     ) {
+        Text(icon, color = Color.White, fontSize = 22.sp)
+    }
+}
+
+@Composable
+private fun ToolCell(icon: String, title: String, selected: Boolean, onClick: () -> Unit) {
+    Column(
+        Modifier.width(58.dp).padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         Box(
-            Modifier.width(170.dp).height(430.dp)
-                .background(Color.Black, RoundedCornerShape(35.dp))
-                .padding(8.dp)
+            Modifier.size(36.dp).background(if (selected) Color(0xFF3E7BFF) else Color.Transparent, RoundedCornerShape(10.dp))
+                .pointerInput(title) {
+                    detectDragGestures(
+                        onDragStart = { onClick() },
+                        onDrag = { change, _ -> change.consume() }
+                    )
+                },
+            contentAlignment = Alignment.Center
         ) {
-            elements.filter { it.visible }.forEach { element ->
-                val x = (element.x.coerceIn(0, 100) * 1.45f).dp
-                val y = (element.y.coerceIn(0, 100) * 4.05f).dp
-                Text(
-                    element.preview,
-                    Modifier.padding(start = x, top = y)
-                        .border(
-                            if (element.id == selectedId) 1.dp else 0.dp,
-                            if (element.id == selectedId) MaterialTheme.colorScheme.primary else Color.Transparent
-                        )
-                        .padding(2.dp)
-                        .pointerInput(element.id) {
-                            detectDragGestures { change, _ ->
-                                change.consume()
-                                onSelect(element.id)
-                            }
-                        },
-                    color = element.color,
-                    fontSize = element.size.sp,
-                    fontWeight = if (element.type == EditorElementType.TIME) FontWeight.Bold else FontWeight.Normal
-                )
-            }
+            Text(icon, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
+        Text(title, color = Color.LightGray, fontSize = 9.sp)
     }
 }
 
 @Composable
-private fun EditorProperties(
-    element: EditorElement,
-    onChange: (EditorElement) -> Unit,
-    onDelete: () -> Unit,
-    onClose: () -> Unit
-) {
-    var formatOpen by remember(element.id) { mutableStateOf(false) }
-    var fontSizeText by remember(element.id) { mutableStateOf(element.size.toString()) }
-
-    Card(Modifier.width(250.dp).fillMaxSize().padding(6.dp)) {
-        Column(
-            Modifier.padding(10.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(7.dp)
-        ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Properties", style = MaterialTheme.typography.titleMedium)
-                IconButton(onClick = onClose) { Text("×") }
-            }
-            Text(element.label, style = MaterialTheme.typography.titleLarge)
-            Text("Position")
-            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                OutlinedButton(onClick = { onChange(element.copy(x = (element.x - 5).coerceAtLeast(0))) }) { Text("←") }
-                OutlinedButton(onClick = { onChange(element.copy(x = (element.x + 5).coerceAtMost(100))) }) { Text("→") }
-                OutlinedButton(onClick = { onChange(element.copy(y = (element.y - 5).coerceAtLeast(0))) }) { Text("↑") }
-                OutlinedButton(onClick = { onChange(element.copy(y = (element.y + 5).coerceAtMost(100))) }) { Text("↓") }
-            }
-
-            if (element.type == EditorElementType.TIME || element.type == EditorElementType.DATE || element.type == EditorElementType.WEEKDAY) {
-                Text("Format")
-                Box {
-                    OutlinedButton(onClick = { formatOpen = true }) { Text(element.format.ifBlank { "Default" }) }
-                    DropdownMenu(expanded = formatOpen, onDismissRequest = { formatOpen = false }) {
-                        val options = when (element.type) {
-                            EditorElementType.TIME -> listOf("H", "HH", "h", "hh", "H:mm", "HH:mm", "h:mm", "hh:mm", "HH:mm:ss")
-                            EditorElementType.DATE -> listOf("DD", "DD/MM", "MM/DD", "DD MMM", "DD MMM YYYY")
-                            else -> listOf("Monday", "Mon")
-                        }
-                        options.forEach { option ->
-                            DropdownMenuItem(text = { Text(option) }, onClick = {
-                                onChange(element.copy(format = option))
-                                formatOpen = false
-                            })
-                        }
-                    }
-                }
-            }
-
-            Text("Alignment")
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf("Left", "Center", "Right").forEach { alignment ->
-                    OutlinedButton(onClick = { onChange(element.copy(alignment = alignment)) }) { Text(alignment) }
-                }
-            }
-
-            Text("Font size")
-            Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = { onChange(element.copy(size = (element.size - 2).coerceAtLeast(8))) }) { Text("−") }
-                OutlinedTextField(value = fontSizeText, onValueChange = {
-                    fontSizeText = it.filter(Char::isDigit)
-                    it.toIntOrNull()?.let { n -> onChange(element.copy(size = n.coerceIn(8, 72))) }
-                }, modifier = Modifier.width(90.dp), singleLine = true)
-                OutlinedButton(onClick = { onChange(element.copy(size = (element.size + 2).coerceAtMost(72))) }) { Text("+") }
-            }
-
-            Text("Font / weight")
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                OutlinedButton(onClick = { onChange(element.copy(label = element.label)) }) { Text("Regular") }
-                OutlinedButton(onClick = { onChange(element.copy(label = element.label)) }) { Text("Bold") }
-            }
-
-            Text("Colour")
-            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                listOf(Color.White, Color.Cyan, Color.Yellow, Color.Red).forEach { colour ->
-                    Button(onClick = { onChange(element.copy(color = colour)) }) { Text("●") }
-                }
-            }
-
-            OutlinedButton(onClick = { onChange(element.copy(locked = !element.locked)) }) {
-                Text(if (element.locked) "Unlock" else "Lock")
-            }
-            OutlinedButton(onClick = { onChange(element.copy(visible = !element.visible)) }) {
-                Text(if (element.visible) "Hide" else "Show")
-            }
-            OutlinedButton(onClick = onDelete) { Text("Delete element") }
-        }
-    }
-}
-
-@Composable
-private fun AddElementDialog(
-    onDismiss: () -> Unit,
-    onAdd: (EditorElementType, String) -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add element") },
-        text = {
-            Column(Modifier.height(480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                val entries = listOf(
-                    EditorElementType.TIME to "12:45",
-                    EditorElementType.DATE to "03 Sep",
-                    EditorElementType.WEEKDAY to "Thursday",
-                    EditorElementType.HEART_RATE to "♥ 72",
-                    EditorElementType.SPO2 to "O₂ 98%",
-                    EditorElementType.STEPS to "6,421",
-                    EditorElementType.BATTERY to "86%",
-                    EditorElementType.RELAXATION to "Relax 72",
-                    EditorElementType.CALORIES to "482 kcal",
-                    EditorElementType.DISTANCE to "4.8 km",
-                    EditorElementType.SLEEP to "7h 32m",
-                    EditorElementType.WEATHER to "28°C",
-                    EditorElementType.TEXT to "Custom text",
-                    EditorElementType.IMAGE to "Image",
-                    EditorElementType.CIRCLE_PROGRESS to "Progress",
-                    EditorElementType.BAR_PROGRESS to "Progress bar"
-                )
-                entries.forEach { (type, preview) ->
-                    OutlinedButton(onClick = { onAdd(type, preview) }, Modifier.fillMaxWidth()) {
-                        Text(type.name.replace('_', ' '))
-                    }
-                }
-            }
-        },
-        confirmButton = { OutlinedButton(onClick = onDismiss) { Text("Close") } }
-    )
-}
-
-@Composable
-private fun LayerPanel(
+private fun WatchCanvasV2(
     elements: List<EditorElement>,
     selectedId: Int,
+    profile: DeviceProfile,
+    metadataOnly: Boolean,
     onSelect: (Int) -> Unit,
-    onToggle: (Int) -> Unit
+    onMove: (Int, Float, Float) -> Unit
 ) {
-    Card(Modifier.fillMaxWidth().padding(6.dp)) {
-        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Layers", style = MaterialTheme.typography.titleMedium)
-            elements.forEach { element ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = { onSelect(element.id) }, Modifier.weight(1f)) {
-                        Text(if (element.id == selectedId) "▣ " + element.label else element.label)
-                    }
-                    OutlinedButton(onClick = { onToggle(element.id) }) { Text(if (element.visible) "👁" else "○") }
+    Box(Modifier.fillMaxSize().background(Color(0xFF0D0E10)), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier.width(190.dp).height(430.dp).background(Color.Black, RoundedCornerShape(34.dp))
+            ) {
+                elements.filter { it.visible }.forEach { element ->
+                    val x = (element.x / 100f * 166f).dp
+                    val y = (element.y / 100f * 408f).dp
+                    Text(
+                        element.preview,
+                        color = element.color,
+                        fontSize = element.size.sp,
+                        modifier = Modifier.padding(start = x, top = y).pointerInput(element.id) {
+                            detectDragGestures { change, amount ->
+                                change.consume()
+                                onSelect(element.id)
+                                onMove(element.id, amount.x / 1.66f, amount.y / 4.08f)
+                            }
+                        }
+                    )
+                }
+                if (metadataOnly) {
+                    Text(
+                        "Band resource preview unavailable",
+                        color = Color.Gray,
+                        fontSize = 10.sp,
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp)
+                    )
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun DeviceProfilePanel(aodEnabled: Boolean, onAodChange: (Boolean) -> Unit) {
-    Card(Modifier.fillMaxWidth().padding(8.dp)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Detected device profile", style = MaterialTheme.typography.titleLarge)
-            Text("Resolution will be supplied by the connected Band capability profile.")
-            Text("Canvas shape: device-specific")
-            Text("Watch-face format: device-specific")
-            Text("Supported data sources: detected at runtime")
-            Text("Resource limits: validated during export")
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("AOD")
-                OutlinedButton(onClick = { onAodChange(!aodEnabled) }) {
-                    Text(if (aodEnabled) "Enabled" else "Disabled")
-                }
+            Spacer(Modifier.height(8.dp))
+            Text("${profile.width} × ${profile.height} px  •  ${profile.source}", color = Color.Gray, fontSize = 10.sp)
+            if (metadataOnly) {
+                Text("Metadata only — no demo values injected", color = Color(0xFF9AA0AA), fontSize = 10.sp)
             }
         }
     }
 }
 
 @Composable
-private fun ValidationPanel(
-    elements: List<EditorElement>,
-    onStoreCheck: () -> Unit,
-    onExport: () -> Unit
+private fun SelectedElementBar(
+    selected: EditorElement?,
+    onChangeSize: (Float) -> Unit,
+    onDelete: () -> Unit,
+    onExport: () -> Unit,
+    onBand: () -> Unit
 ) {
-    val unsupported = elements.count { it.type == EditorElementType.RELAXATION }
-    Card(Modifier.fillMaxWidth().padding(8.dp)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Pre-export validation", style = MaterialTheme.typography.titleLarge)
-            Text("✓ Element model is internally consistent")
-            Text("✓ Canvas uses the selected device profile")
-            Text(if (unsupported == 0) "✓ No known unsupported placeholder elements" else "⚠ Some elements require device capability verification")
-            Text("✓ Store metadata can be checked before export")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onStoreCheck) { Text("Store check") }
-                OutlinedButton(onClick = onExport) { Text("Export") }
-            }
+    Row(
+        Modifier.fillMaxWidth().height(54.dp).background(Color(0xFF18191D)).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(selected?.type?.name ?: "Nothing selected", color = Color.White, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 4.dp))
+        listOf("−" to { onChangeSize(-2f) }, "+" to { onChangeSize(2f) }, "Export" to onExport, "Band" to onBand, "×" to onDelete).forEach { (label, action) ->
+            Box(
+                Modifier.size(44.dp).background(Color(0xFF27282D), RoundedCornerShape(10.dp)).pointerInput(label) {
+                    detectDragGestures(onDragStart = { action() }, onDrag = { change, _ -> change.consume() })
+                },
+                contentAlignment = Alignment.Center
+            ) { Text(label, color = Color.White, fontSize = 12.sp) }
         }
     }
 }
 
 @Composable
-private fun StoreCheckDialog(
+private fun FullPreview(
     elements: List<EditorElement>,
-    onDismiss: () -> Unit,
-    onExport: () -> Unit
+    profile: DeviceProfile,
+    aod: Boolean,
+    onBack: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Xiaomi Store readiness") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                Text("Technical")
-                Text("✓ Editor structure")
-                Text("✓ Target-device validation hook")
-                Text("⚠ Final package validation depends on the target Xiaomi format")
-                Text("Content & licensing")
-                Text("⚠ Confirm ownership/licensing of images, fonts and other assets")
-                Text("Metadata")
-                Text("⚠ Review name, description, tags and preview assets")
-                Text("MIIT does not upload or claim approval from Xiaomi.")
-            }
-        },
-        confirmButton = { Button(onClick = onExport) { Text("Export submission package") } },
-        dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } }
-    )
-}
-
-@Composable
-private fun EditorPreview(elements: List<EditorElement>, aod: Boolean, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().background(Color.Black), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(if (aod) "AOD preview" else "Watch-face preview", color = Color.White, modifier = Modifier.padding(12.dp))
-        WatchCanvas(elements, 0, {}, { _, _, _ -> })
-        Button(onClick = onBack) { Text("Back to editor") }
+        Row(
+            Modifier.fillMaxWidth().height(52.dp).background(Color(0xFF18191D)).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ToolGlyph("‹", "Back", onBack)
+            Text(if (aod) "AOD Preview" else "Watch Face Preview", color = Color.White, fontSize = 15.sp)
+        }
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            WatchCanvasV2(elements, 0, profile, false, {}, { _, _, _ -> })
+        }
     }
 }
-
 
 private data class DeviceProfile(val width: Int, val height: Int, val source: String)
 
-private object DeviceProfileResolver {
-    fun resolve(model: String?): DeviceProfile {
-        val m = model.orEmpty().lowercase()
-        return when {
-            "band 10" in m || "smart band 10" in m -> DeviceProfile(212, 520, "Xiaomi Smart Band 10")
-            "band 9" in m || "smart band 9" in m -> DeviceProfile(192, 490, "Xiaomi Smart Band 9")
-            else -> DeviceProfile(192, 490, "Fallback profile — verify target device")
-        }
+private fun resolveProfile(device: BandDevice?): DeviceProfile {
+    val model = (device?.model ?: device?.name ?: "").lowercase()
+    return when {
+        "band 10" in model || "smart band 10" in model -> DeviceProfile(212, 520, "Xiaomi Smart Band 10")
+        "band 9" in model || "smart band 9" in model -> DeviceProfile(192, 490, "Xiaomi Smart Band 9")
+        else -> DeviceProfile(192, 490, "Runtime profile unavailable — verify target device")
     }
 }
 
 private fun serializeElements(elements: List<EditorElement>): String =
     elements.joinToString(prefix = "[", postfix = "]") { e ->
-        "{\"id\":${e.id},\"type\":\"${jsonEscape(e.type.name)}\",\"label\":\"${jsonEscape(e.label)}\",\"preview\":\"${jsonEscape(e.preview)}\",\"format\":\"${jsonEscape(e.format)}\",\"size\":${e.size},\"x\":${e.x},\"y\":${e.y},\"color\":\"${e.color.value.toLong().toString(16)}\",\"visible\":${e.visible},\"locked\":${e.locked},\"alignment\":\"${jsonEscape(e.alignment)}\"}"
+        "{\"id\":${e.id},\"type\":\"${e.type.name}\",\"preview\":\"${jsonEscape(e.preview)}\",\"x\":${e.x},\"y\":${e.y},\"size\":${e.size},\"visible\":${e.visible},\"locked\":${e.locked}}"
     }
 
 private fun jsonEscape(value: String): String =
