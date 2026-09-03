@@ -56,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.miit.app.band.AuthKeyParser
 import com.miit.app.band.BandConnectionState
@@ -415,122 +416,175 @@ private fun EditorScreen(
     onBack: () -> Unit,
     onAction: (String) -> Unit
 ) {
-    var selectedTool by remember { mutableStateOf("Select") }
-    var menuExpanded by remember { mutableStateOf(false) }
-    val tools = listOf("Select", "Text", "Image", "Shape", "Sticker", "Filter", "Font", "Align")
+    data class EditorElement(
+        val id: Int,
+        val kind: String,
+        val text: String,
+        val format: String = "",
+        val size: Int = 20,
+        val alignment: String = "Center"
+    )
+
+    var nextId by remember { mutableIntStateOf(4) }
+    var elements by remember {
+        mutableStateOf(
+            listOf(
+                EditorElement(1, "Time", "12:45", "HH:mm", 38),
+                EditorElement(2, "Date", "03 Sep", "DD MMM", 18),
+                EditorElement(3, "Steps", "6,421", "Steps", 18)
+            )
+        )
+    }
+    var selectedId by remember { mutableIntStateOf(1) }
+    var addMenu by remember { mutableStateOf(false) }
+    var formatMenu by remember { mutableStateOf(false) }
+    val selected = elements.firstOrNull { it.id == selectedId }
+
+    fun addElement(kind: String, text: String, format: String = "") {
+        val id = nextId++
+        elements = elements + EditorElement(id, kind, text, format, 18)
+        selectedId = id
+        addMenu = false
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(display?.name ?: "Custom display") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Text("‹", style = MaterialTheme.typography.headlineMedium)
-                    }
+                    IconButton(onClick = onBack) { Text("‹", style = MaterialTheme.typography.headlineMedium) }
                 },
                 actions = {
-                    IconButton(onClick = { menuExpanded = true }) {
-                        Text("⋮", style = MaterialTheme.typography.headlineMedium)
-                    }
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Save on phone") },
-                            onClick = { menuExpanded = false; onAction("save") }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Share") },
-                            onClick = { menuExpanded = false; onAction("share") }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Set as band display") },
-                            onClick = { menuExpanded = false; onAction("band") }
-                        )
-                    }
+                    IconButton(onClick = { onAction("save") }) { Text("Save") }
+                    IconButton(onClick = { onAction("share") }) { Text("Share") }
                 }
             )
         }
     ) { padding ->
-        Column(
-            Modifier.fillMaxSize().padding(padding),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Surface(
-                Modifier.fillMaxWidth().weight(1f),
-                tonalElevation = 2.dp
-            ) {
-                Column(
-                    Modifier.fillMaxSize().padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(7.dp)
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Canvas", style = MaterialTheme.typography.labelLarge)
-                        Text("Band display", style = MaterialTheme.typography.labelMedium)
-                    }
+        Column(Modifier.fillMaxSize().padding(padding), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Canvas  •  192 × 490px", Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelLarge)
 
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Card(Modifier.width(174.dp).height(238.dp)) {
-                            Column(
-                                Modifier.fillMaxSize().padding(14.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Text(
-                                    "12:45",
-                                    style = MaterialTheme.typography.displayMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(Modifier.height(10.dp))
-                                Text("Tuesday  •  25 Aug")
-                                Spacer(Modifier.height(18.dp))
-                                Text("♥ 72   •   6,421")
-                                Spacer(Modifier.height(12.dp))
-                                Text(selectedTool, style = MaterialTheme.typography.labelSmall)
+            Box(
+                Modifier.fillMaxWidth().weight(1f).background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Card(Modifier.width(190.dp).height(310.dp)) {
+                    Box(Modifier.fillMaxSize().padding(10.dp)) {
+                        elements.forEach { element ->
+                            Text(
+                                element.text,
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .background(
+                                        if (element.id == selectedId) MaterialTheme.colorScheme.primaryContainer
+                                        else MaterialTheme.colorScheme.surface
+                                    )
+                                    .padding(4.dp)
+                                    .pointerInput(element.id) {
+                                        detectDragGestures { change, _ ->
+                                            change.consume()
+                                            selectedId = element.id
+                                        }
+                                    },
+                                fontSize = element.size.sp,
+                                fontWeight = if (element.kind == "Time") FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+            }
+
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Button(onClick = { addMenu = true }) { Text("+ Element") }
+                OutlinedButton(onClick = {
+                    selected?.let { s ->
+                        elements = elements.filterNot { it.id == s.id }
+                        selectedId = elements.firstOrNull()?.id ?: 0
+                    }
+                }) { Text("Delete") }
+                OutlinedButton(onClick = { onAction("save") }) { Text("Save") }
+                OutlinedButton(onClick = { onAction("band") }) { Text("Set on Band") }
+            }
+
+            if (addMenu) {
+                Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                    Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Add band element", style = MaterialTheme.typography.titleMedium)
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            listOf(
+                                "Time" to "12:45",
+                                "Date" to "03 Sep",
+                                "Weekday" to "Thursday",
+                                "Heart rate" to "♥ 72",
+                                "SpO₂" to "O₂ 98%",
+                                "Steps" to "6,421",
+                                "Battery" to "86%",
+                                "Relaxation" to "Relax 72",
+                                "Custom text" to "Text"
+                            ).forEach { (kind, preview) ->
+                                OutlinedButton(onClick = { addElement(kind, preview, if (kind == "Time") "HH:mm" else "") }) {
+                                    Text(kind)
+                                }
                             }
                         }
                     }
-
-                    Text("Tool: $selectedTool", style = MaterialTheme.typography.labelMedium)
                 }
             }
 
-            HorizontalDivider()
-
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                tools.forEach { tool ->
-                    OutlinedButton(onClick = { selectedTool = tool }) {
-                        Text(if (tool == selectedTool) "✓ $tool" else tool)
+            selected?.let { s ->
+                Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text("Selected: " + s.kind, style = MaterialTheme.typography.titleMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Format")
+                            Box {
+                                OutlinedButton(onClick = { formatMenu = true }) { Text(s.format.ifBlank { "Default" }) }
+                                DropdownMenu(expanded = formatMenu, onDismissRequest = { formatMenu = false }) {
+                                    val formats = when (s.kind) {
+                                        "Time" -> listOf("H", "HH", "h", "hh", "H:mm", "HH:mm", "h:mm", "hh:mm", "HH:mm:ss")
+                                        "Date" -> listOf("DD", "DD/MM", "MM/DD", "DD MMM", "DD MMM YYYY")
+                                        "Weekday" -> listOf("Monday", "Mon")
+                                        else -> listOf("Default")
+                                    }
+                                    formats.forEach { f ->
+                                        DropdownMenuItem(
+                                            text = { Text(f) },
+                                            onClick = {
+                                                elements = elements.map { if (it.id == s.id) it.copy(format = f) else it }
+                                                formatMenu = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Size " + s.size + "sp")
+                            OutlinedButton(onClick = {
+                                elements = elements.map { if (it.id == s.id) it.copy(size = (it.size - 2).coerceAtLeast(10)) else it }
+                            }) { Text("−") }
+                            OutlinedButton(onClick = {
+                                elements = elements.map { if (it.id == s.id) it.copy(size = (it.size + 2).coerceAtMost(72)) else it }
+                            }) { Text("+") }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Align")
+                            listOf("Left", "Center", "Right").forEach { a ->
+                                OutlinedButton(onClick = {
+                                    elements = elements.map { if (it.id == s.id) it.copy(alignment = a) else it }
+                                }) { Text(a) }
+                            }
+                        }
                     }
                 }
-            }
-
-            Button(
-                onClick = { onAction("save") },
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp)
-            ) {
-                Text("Save display")
             }
         }
     }
 }
+
 
 @Composable
 private fun AuthKeyInstructionsDialog(onDismiss: () -> Unit) {
