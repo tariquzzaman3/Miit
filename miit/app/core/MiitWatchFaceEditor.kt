@@ -482,7 +482,7 @@ private fun StoreCheckDialog(
 private fun EditorPreview(elements: List<EditorElement>, aod: Boolean, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().background(Color.Black), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(if (aod) "AOD preview" else "Watch-face preview", color = Color.White, modifier = Modifier.padding(12.dp))
-        WatchCanvas(elements, 0, {}, {})
+        WatchCanvas(elements, 0, {}, { _, _, _ -> })
         Button(onClick = onBack) { Text("Back to editor") }
     }
 }
