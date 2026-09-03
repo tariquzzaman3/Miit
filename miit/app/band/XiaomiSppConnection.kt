@@ -213,15 +213,18 @@ class XiaomiSppConnection(
     }
 
     private fun handleRuntimeCommand(commandBody: ByteArray) {
-        val parsed = XiaomiCommandParser.parse(commandBody)
-        if (parsed == null) { onEvent("Xiaomi command: protobuf parse failed bytes=${commandBody.size}"); return }
+        val parsed = XiaomiCommandParser.parse(commandBody) ?: run {
+            onEvent("Xiaomi command: protobuf parse failed bytes=${commandBody.size}")
+            return
+        }
         onEvent("Xiaomi command: type=${parsed.type} subtype=${parsed.subtype}")
-        if (parsed.type == XiaomiCommandParser.TYPE_WATCHFACE) {
-            onEvent("Xiaomi inventory: received watchface metadata count=${parsed.watchfaces.size}")
-            if (parsed.watchfaces.isNotEmpty()) onData(BandDataUpdate(watchfaces = parsed.watchfaces))
+
+        if (parsed.type == XiaomiCommandParser.TYPE_WATCHFACE && parsed.watchfaces.isNotEmpty()) {
+            onEvent("Xiaomi inventory: received ${parsed.watchfaces.size} watchfaces")
+            onData(BandDataUpdate(watchfaces = parsed.watchfaces))
         }
         if (parsed.type == XiaomiCommandParser.TYPE_SYSTEM && parsed.screenItems.isNotEmpty()) {
-            onEvent("Xiaomi inventory: received band menu items count=${parsed.screenItems.size}")
+            onEvent("Xiaomi inventory: received ${parsed.screenItems.size} band menu items")
         }
         if (parsed.battery != null || parsed.batteryState != null || parsed.charging != null ||
             parsed.firmware != null || parsed.model != null || parsed.hardware != null || parsed.serialNumber != null
