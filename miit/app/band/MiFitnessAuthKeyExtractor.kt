@@ -1,17 +1,22 @@
 package com.miit.app.band
 
+import android.Manifest
+import android.app.Activity
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import java.io.File
 import java.io.InputStream
 import java.util.zip.ZipInputStream
 
 /**
- * Finds Xiaomi/Mi Fitness authentication-key candidates from data already stored
- * on the phone. No Xiaomi account credentials or network request are used.
+ * Finds Xiaomi/Mi Fitness authentication-key candidates from the exported
+ * wearablelog directory and Mi Fitness log locations. No network is used.
  */
 object MiFitnessAuthKeyExtractor {
     data class Candidate(
@@ -21,28 +26,49 @@ object MiFitnessAuthKeyExtractor {
     )
 
     private val keyPatterns = listOf(
-        Regex("""(?i)\b(?:auth[_-]?key|authkey|encrypt[_-]?key|token)\s*[=:]\s*["']?([0-9a-f]{32})["']?"""),
-        Regex("""(?i)["'](?:auth[_-]?key|authkey|encrypt[_-]?key|token)["']\s*:\s*["']([0-9a-f]{32})["']""")
+        Regex("""(?is)\\b(?:auth[_-]?key|authkey|encrypt[_-]?key|token)\\b.{0,180}?([0-9a-f]{32})\\b"""),
+        Regex("""(?is)["'](?:auth[_-]?key|authkey|encrypt[_-]?key|token)["']\\s*:\\s*["']([0-9a-f]{32})["']"""),
+        Regex("""(?is)\\b(?:token|encryptKey|authKey)\\s*=\\s*["']?([0-9a-f]{32})["']?""")
     )
 
     private val devicePatterns = listOf(
-        Regex("""(?i)\b(?:mac|bluetooth[_-]?address|device[_-]?id)\s*[=:]\s*["']?([0-9a-f]{12,17})["']?"""),
-        Regex("""(?i)\b(MI[_ -]?BAND[^\r\n,;]*)""")
+        Regex("""(?i)\\b(?:mac|bluetooth[_-]?address|device[_-]?id)\\s*[=:]\\s*["']?([0-9a-f:]{12,17})["']?"""),
+        Regex("""(?i)\\b(MI[_ -]?BAND[^\\r\\n,;]*)""")
     )
 
     fun find(context: Context): List<Candidate> {
+        // Android 10–12 can require READ_EXTERNAL_STORAGE for direct/shared log access.
+        if (Build.VERSION.SDK_INT in 29..32 &&
+            context.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+        ) {
+            (context as? Activity)?.let { activity ->
+                Handler(Looper.getMainLooper()).post {
+                    activity.requestPermissions(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE), 7402)
+                }
+            }
+            return emptyList()
+        }
+
         val candidates = linkedMapOf<String, Candidate>()
 
         fun inspect(text: String, source: String) {
             val deviceHint = devicePatterns.firstNotNullOfOrNull { it.find(text)?.groupValues?.getOrNull(1) }
             keyPatterns.forEach { pattern ->
                 pattern.findAll(text).forEach { match ->
-                    val key = match.groupValues[1].lowercase()
-                    candidates.putIfAbsent(key, Candidate(key, source, deviceHint))
+                    val key = match.groupValues.last().lowercase()
+                    if (key.length == 32) candidates.putIfAbsent(key, Candidate(key, source, deviceHint))
                 }
             }
         }
 
+        // The expected export layout is Download/wearablelog/<log>.zip.
+        val wearableLog = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            .resolve("wearablelog")
+        if (wearableLog.exists()) {
+            scanDirectory(wearableLog, inspect)
+        }
+
+        // Also inspect the shared Downloads provider, which is the reliable path on newer Android.
         if (Build.VERSION.SDK_INT >= 29) {
             val resolver = context.contentResolver
             val projection = arrayOf(
@@ -62,30 +88,20 @@ object MiFitnessAuthKeyExtractor {
                     val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
                     val pathCol = cursor.getColumnIndexOrThrow(MediaStore.Downloads.RELATIVE_PATH)
                     while (cursor.moveToNext()) {
-                        val name = cursor.getString(nameCol) ?: continue
+                        val name = cursor.getString(nameCol).orEmpty()
                         val relativePath = cursor.getString(pathCol).orEmpty()
-                        val relevant = relativePath.contains("Download", ignoreCase = true) ||
-                            name.contains("wearable", ignoreCase = true) ||
-                            name.contains("xiaomi", ignoreCase = true) ||
-                            name.contains("mi fitness", ignoreCase = true) ||
-                            name.contains("transfer.device", ignoreCase = true)
-                        if (!relevant) continue
-
+                        val inWearableLog = relativePath.contains("wearablelog", ignoreCase = true)
+                        if (!inWearableLog && !name.contains("wearablelog", ignoreCase = true) && !name.endsWith("log.zip", true)) continue
                         val uri = Uri.withAppendedPath(
                             MediaStore.Downloads.EXTERNAL_CONTENT_URI,
                             cursor.getLong(idCol).toString()
                         )
                         resolver.openInputStream(uri)?.use { input ->
-                            inspectStream(input, name, "Mi Fitness Downloads/" + relativePath + name, ::inspect)
+                            inspectStream(input, name, "Downloads/$relativePath$name", ::inspect)
                         }
                     }
                 }
-            }.onFailure {
-                inspect("", "Mi Fitness Downloads scan error: " + it.javaClass.simpleName)
-            }
-        } else {
-            val download = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            scanFiles(download, ::inspect)
+            }.onFailure { /* Fall through to direct log locations. */ }
         }
 
         listOf(
@@ -93,16 +109,16 @@ object MiFitnessAuthKeyExtractor {
             "/storage/emulated/0/Android/data/com.mi.health/files/log"
         ).forEach { path ->
             val directory = File(path)
-            if (directory.exists()) scanFiles(directory, ::inspect)
+            if (directory.exists()) scanDirectory(directory, inspect)
         }
 
         return candidates.values.toList()
     }
 
-    private fun scanFiles(directory: File, inspect: (String, String) -> Unit) {
+    private fun scanDirectory(directory: File, inspect: (String, String) -> Unit) {
         directory.listFiles()
             ?.sortedByDescending { it.lastModified() }
-            ?.take(80)
+            ?.take(100)
             ?.forEach { file ->
                 if (!file.isFile) return@forEach
                 runCatching {
@@ -124,14 +140,23 @@ object MiFitnessAuthKeyExtractor {
                 var entry = zip.nextEntry
                 while (entry != null) {
                     if (!entry.isDirectory) {
-                        val bytes = zip.readBytesLimited(4 * 1024 * 1024)
-                        inspect(bytes.toString(Charsets.UTF_8), source + "!/" + entry.name)
+                        val entryName = entry.name
+                        val relevant = entryName.contains("XiaomiFit", true) ||
+                            entryName.contains("Transfer.device", true) ||
+                            entryName.contains("token", true) ||
+                            entryName.contains("auth", true) ||
+                            entryName.endsWith(".log", true) ||
+                            entryName.endsWith(".txt", true)
+                        if (relevant) {
+                            val bytes = zip.readBytesLimited(8 * 1024 * 1024)
+                            inspect(bytes.toString(Charsets.UTF_8), source + "!/" + entryName)
+                        }
                     }
                     entry = zip.nextEntry
                 }
             }
         } else {
-            val bytes = input.readBytesLimited(4 * 1024 * 1024)
+            val bytes = input.readBytesLimited(8 * 1024 * 1024)
             inspect(bytes.toString(Charsets.UTF_8), source)
         }
     }
