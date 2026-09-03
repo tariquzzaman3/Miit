@@ -520,6 +520,7 @@ private fun AuthKeyCandidatesDialog(
     )
 }
 
+@Composable
 private fun SettingsDialog(onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
