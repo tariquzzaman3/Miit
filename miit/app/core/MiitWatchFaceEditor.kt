@@ -92,7 +92,9 @@ fun MiitWatchFaceEditor(
     var aodEnabled by remember { mutableStateOf(false) }
     var zoom by remember { mutableStateOf("Fit") }
 
-    val selected = elements.firstOrNull { it.id == selectedId }\n    val context = LocalContext.current\n    val profile = remember(device?.model, device?.name) { DeviceProfileResolver.resolve(device?.model ?: device?.name) }
+    val selected = elements.firstOrNull { it.id == selectedId }
+    val context = LocalContext.current
+    val profile = remember(device?.model, device?.name) { DeviceProfileResolver.resolve(device?.model ?: device?.name) }
 
     fun add(type: EditorElementType, preview: String) {
         val id = nextId++
@@ -147,7 +149,13 @@ fun MiitWatchFaceEditor(
                                     zoom = if (zoom == "Fit") "100%" else "Fit"
                                 }) { Text(zoom) }
                             }
-                            WatchCanvas(elements, selectedId, onSelect = { selectedId = it }, onMove = { id, dx, dy ->\n                                val index = elements.indexOfFirst { it.id == id }\n                                if (index >= 0 && !elements[index].locked) {\n                                    val e = elements[index]\n                                    elements[index] = e.copy(x = (e.x + dx).coerceIn(0, 100), y = (e.y + dy).coerceIn(0, 100))\n                                }\n                            })
+                            WatchCanvas(elements, selectedId, onSelect = { selectedId = it }, onMove = { id, dx, dy ->
+                                val index = elements.indexOfFirst { it.id == id }
+                                if (index >= 0 && !elements[index].locked) {
+                                    val e = elements[index]
+                                    elements[index] = e.copy(x = (e.x + dx).coerceIn(0, 100), y = (e.y + dy).coerceIn(0, 100))
+                                }
+                            })
                         }
 
                         if (propertiesOpen && selected != null) {
@@ -172,7 +180,11 @@ fun MiitWatchFaceEditor(
                     ) {
                         Button(onClick = { addOpen = true }) { Text("+ Element") }
                         OutlinedButton(onClick = { propertiesOpen = !propertiesOpen }) { Text("Properties") }
-                        OutlinedButton(onClick = {\n                            WatchfaceProjectStore.save(context, display?.name ?: "MIIT watch face", profile.width, profile.height, aodEnabled, serializeElements(elements))\n                            Toast.makeText(context, "Project saved on this phone.", Toast.LENGTH_SHORT).show()\n                            onAction("save")\n                        }) { Text("Save") }
+                        OutlinedButton(onClick = {
+                            WatchfaceProjectStore.save(context, display?.name ?: "MIIT watch face", profile.width, profile.height, aodEnabled, serializeElements(elements))
+                            Toast.makeText(context, "Project saved on this phone.", Toast.LENGTH_SHORT).show()
+                            onAction("save")
+                        }) { Text("Save") }
                         OutlinedButton(onClick = { onAction("share") }) { Text("Share") }
                         OutlinedButton(onClick = { onAction("band") }) { Text("Set on Band") }
                         OutlinedButton(onClick = { storeCheckOpen = true }) { Text("Store check") }
