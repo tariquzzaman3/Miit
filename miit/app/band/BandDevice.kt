@@ -10,6 +10,7 @@ data class BandDataUpdate(
     val hardware: String? = null,
     val serialNumber: String? = null,
     val displays: List<BandDisplay>? = null,
+    val watchfaces: List<BandDisplay>? = null,
     val heartRate: Int? = null
 )
 
@@ -29,6 +30,7 @@ data class BandDevice(
     val serialNumber: String? = null,
     val heartRate: Int? = null,
     val displays: List<BandDisplay> = emptyList(),
+    val watchfaces: List<BandDisplay> = emptyList(),
     val connected: Boolean = false,
     val authenticated: Boolean = false
 )
