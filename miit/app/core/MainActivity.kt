@@ -108,20 +108,27 @@ private fun MiitApp() {
     var authStatus by remember { mutableStateOf<String?>(null) }
     var authCandidates by remember { mutableStateOf<List<MiFitnessAuthKeyExtractor.Candidate>>(emptyList()) }
     var connectedBand by remember { mutableStateOf<BandDevice?>(null) }
+    var automaticConnection by remember { mutableStateOf(false) }
     var editingDisplay by remember { mutableStateOf<BandDisplay?>(null) }
     var screen by remember { mutableStateOf(MiitScreen.CONNECTION) }
     var showHelp by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    fun acceptKeys(found: List<MiFitnessAuthKeyExtractor.Candidate>) {
+    fun acceptKeys(found: List<MiFitnessAuthKeyExtractor.Candidate>, startAutomatically: Boolean = false) {
         when {
-            found.isEmpty() -> authStatus = "No auth key found automatically. Use 'Select wearablelog ZIP' or manual fallback."
+            found.isEmpty() -> {
+                automaticConnection = false
+                authStatus = "Automatic auth-key retrieval failed. Enter the Auth Key manually."
+            }
             found.size == 1 -> {
                 authKeyText = found[0].key
                 prefs.edit().putString("auth_key", found[0].key).apply()
-                authStatus = "Auth key found in Mi Fitness export ✓"
+                automaticConnection = startAutomatically
+                authStatus = "Auth key found automatically ✓"
+                if (startAutomatically) scanner.startScan()
             }
             else -> {
+                automaticConnection = false
                 authCandidates = found
                 authStatus = "Multiple possible keys found. Choose the matching key."
             }
@@ -133,7 +140,27 @@ private fun MiitApp() {
         authStatus = "Reading selected wearablelog ZIP…"
         scope.launch {
             val result = withContext(Dispatchers.IO) { MiFitnessAuthKeyExtractor.findFromUri(context, uri) }
-            acceptKeys(result)
+            acceptKeys(result, startAutomatically = true)
+        }
+    }
+
+    LaunchedEffect(devices, automaticConnection, authKeyText, connectionState) {
+        if (automaticConnection &&
+            authKeyText.length == 32 &&
+            devices.isNotEmpty() &&
+            connectionState == BandConnectionState.Scanning
+        ) {
+            val key = AuthKeyParser.parse(authKeyText)
+            val target = devices.firstOrNull()
+            if (key != null && target != null) {
+                automaticConnection = false
+                authStatus = "Connecting automatically to " + target.name + "…"
+                scanner.connect(target, key)
+            }
+        }
+        if (automaticConnection && connectionState == BandConnectionState.Error) {
+            automaticConnection = false
+            authStatus = "Automatic connection failed. Use Manual fallback."
         }
     }
 
@@ -166,7 +193,7 @@ private fun MiitApp() {
                     authStatus = "Searching Download/wearablelog/<timestamp>log.zip…"
                     scope.launch {
                         val result = withContext(Dispatchers.IO) { MiFitnessAuthKeyExtractor.find(context) }
-                        acceptKeys(result)
+                        acceptKeys(result, startAutomatically = true)
                     }
                 },
                 onPickZip = { picker.launch(arrayOf("application/zip", "application/octet-stream")) },
@@ -290,64 +317,71 @@ private fun ConnectionScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun BandScreen(band: BandDevice, onEdit: (BandDisplay) -> Unit, onNew: () -> Unit) {
+private fun BandScreen(
+    band: BandDevice,
+    onEdit: (BandDisplay) -> Unit,
+    onNew: () -> Unit
+) {
+    val runtimeInfo = buildString {
+        band.batteryPercentage?.let { append("🔋 ").append(it).append("%") }
+        if (band.charging == true) append(" • ⚡")
+        band.model?.let { append(" • ").append(it) }
+        band.firmware?.let { append(" • ").append(it) }
+        band.countryVariant?.takeIf { it.isNotBlank() }?.let { append(" • ").append(it) }
+    }
+
     Scaffold(topBar = { TopAppBar(title = { Text(band.name) }) }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Band information", style = MaterialTheme.typography.titleLarge)
-                        band.model?.let { Text("Model: $it") }
-                        band.firmware?.let { Text("Firmware: $it") }
-                        band.hardware?.let { Text("Hardware: $it") }
-                        band.batteryPercentage?.let { Text("Battery: $it%") }
-                        band.serialNumber?.let { Text("Serial: $it") }
-                    }
-                }
+                Text(
+                    runtimeInfo.ifBlank { "Connected • reading Band information…" },
+                    color = Color.Gray,
+                    fontSize = 13.sp
+                )
             }
-            item {
-                Text("Band screens", style = MaterialTheme.typography.titleLarge)
-                Text("Workout, Sleep, Timer, Alarm and similar entries are system/menu metadata. They are not watchface files and are not sent into the editor as demo faces.", color = Color.Gray, fontSize = 12.sp)
-            }
-            if (band.displays.isEmpty()) item { Text("No Band screen metadata received yet.", color = Color.Gray) }
-            else items(band.displays, key = { it.stableId }) { display ->
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(display.name ?: display.code ?: "Unnamed screen", style = MaterialTheme.typography.titleMedium)
-                        display.code?.let { Text("Code: $it", color = Color.Gray, fontSize = 11.sp) }
-                    }
-                }
-            }
-            item {
-                Text("Watch faces", style = MaterialTheme.typography.titleLarge)
-                Text("Only actual watchface inventory belongs here.", color = Color.Gray, fontSize = 12.sp)
-            }
+            item { Text("Watch faces", style = MaterialTheme.typography.titleLarge) }
+
             if (band.watchfaces.isEmpty()) {
                 item {
-                    Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text("No watchface resource available", style = MaterialTheme.typography.titleMedium)
-                            Text("The Band resource/download protocol is still required before MIIT can show the real image.", color = Color.Gray, fontSize = 12.sp)
-                        }
-                    }
+                    Text("No watch-face entries received yet.", color = Color.Gray, fontSize = 13.sp)
                 }
-            } else items(band.watchfaces, key = { it.stableId }) { display ->
-                Card(Modifier.fillMaxWidth()) {
-                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.width(70.dp).height(110.dp).background(Color.Black, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Text("No image", color = Color.Gray, fontSize = 10.sp) }
-                        Spacer(Modifier.width(10.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(display.name ?: display.code ?: "Unnamed watch face", style = MaterialTheme.typography.titleMedium)
-                            display.code?.let { Text(it, color = Color.Gray, fontSize = 11.sp) }
-                            OutlinedButton(onClick = { onEdit(display) }) { Text("Edit") }
+            } else {
+                items(band.watchfaces, key = { it.stableId }) { face ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier.width(70.dp).height(110.dp)
+                                    .background(Color.Black, RoundedCornerShape(14.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Preview unavailable", color = Color.Gray, fontSize = 9.sp)
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(face.name ?: face.code ?: "Unnamed watch face")
+                                face.code?.let { Text(it, color = Color.Gray, fontSize = 11.sp) }
+                                OutlinedButton(onClick = { onEdit(face) }) { Text("Edit") }
+                            }
                         }
                     }
                 }
             }
-            item { Button(onClick = onNew, modifier = Modifier.fillMaxWidth()) { Text("＋ Create new watch face") } }
+
+            item {
+                Button(onClick = onNew, Modifier.fillMaxWidth()) {
+                    Text("＋ Custom display")
+                }
+            }
         }
     }
 }
+
 
 @Composable
 private fun AuthKeyInstructionsDialog(onDismiss: () -> Unit) {
