@@ -1,5 +1,6 @@
 package com.miit.app.band
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.bluetooth.BluetoothAdapter
@@ -7,7 +8,6 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
-import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.companion.AssociationRequest
 import android.companion.BluetoothDeviceFilter
@@ -17,10 +17,14 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.Executors
 
 /** Discovery and connection state machine for Xiaomi Smart Band 8+/9/10. */
 class BandScanner(context: Context) {
@@ -50,6 +54,10 @@ class BandScanner(context: Context) {
     private var activeAddress: String? = null
     private var activeAuthKey: ByteArray? = null
     private var spp: XiaomiSppConnection? = null
+    private var automaticMode = false
+    private var automaticAttemptedAddress: String? = null
+    private val worker = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private val bondReceiver = object : BroadcastReceiver() {
         @SuppressLint("MissingPermission")
@@ -84,12 +92,44 @@ class BandScanner(context: Context) {
                 Context.RECEIVER_EXPORTED
             )
         }.onFailure { MiitTestLog.add("Bond receiver registration failed: ${it.javaClass.simpleName}") }
+
+        // Automatic-first connection: find the key from Mi Fitness export, then scan and
+        // connect to the first Xiaomi Band discovered. Manual entry remains the fallback.
+        beginAutomaticConnection()
+    }
+
+    private fun beginAutomaticConnection() {
+        worker.execute {
+            MiitTestLog.add("Automatic connection: searching Download/wearablelog/*.zip")
+            val candidates = runCatching { MiFitnessAuthKeyExtractor.find(appContext) }
+                .onFailure { MiitTestLog.add("Automatic auth-key search failed: ${it.javaClass.simpleName}") }
+                .getOrDefault(emptyList())
+            val key = candidates.firstOrNull()?.key?.let { AuthKeyParser.parse(it) }
+            if (key == null) {
+                MiitTestLog.add("Automatic connection: no Mi Fitness auth key found; manual auth-key fallback available")
+                mainHandler.post { startScan() }
+                return@execute
+            }
+            automaticMode = true
+            activeAuthKey = key.copyOf()
+            appContext.getSharedPreferences("miit_pairing", Context.MODE_PRIVATE)
+                .edit().putString("auth_key", candidates.first().key).apply()
+            MiitTestLog.add("Automatic connection: auth key found; starting Band scan")
+            mainHandler.post { startScan() }
+        }
     }
 
     @SuppressLint("MissingPermission")
     fun startScan() {
         val bt = adapter
         val bleScanner = scanner
+        if (Build.VERSION.SDK_INT >= 31 &&
+            appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED
+        ) {
+            MiitTestLog.add("BLE scan waiting for BLUETOOTH_SCAN permission")
+            mainHandler.postDelayed({ startScan() }, 1000)
+            return
+        }
         if (bt?.isEnabled != true || bleScanner == null) {
             _state.value = BandConnectionState.Error
             MiitTestLog.add("BLE scan unavailable")
@@ -106,13 +146,26 @@ class BandScanner(context: Context) {
                 if (!isLikelyXiaomiBand(name)) return
                 val item = BandDevice(name, device.address, result.rssi)
                 _devices.value = (_devices.value.filterNot { it.address == item.address } + item).sortedByDescending { it.rssi }
+
+                // Automatic mode immediately uses the discovered Mi Fitness key.
+                if (automaticMode && automaticAttemptedAddress == null &&
+                    _state.value == BandConnectionState.Scanning && activeAuthKey?.size == 16
+                ) {
+                    automaticAttemptedAddress = item.address
+                    MiitTestLog.add("Automatic connection: trying ${item.name} ${item.address}")
+                    connect(item, activeAuthKey?.copyOf())
+                }
             }
             override fun onScanFailed(errorCode: Int) {
                 MiitTestLog.add("BLE scan failed: error=$errorCode")
                 _state.value = BandConnectionState.Error
             }
         }
-        bleScanner.startScan(scanCallback)
+        runCatching { bleScanner.startScan(scanCallback) }
+            .onFailure {
+                MiitTestLog.add("BLE scan start exception: ${it.javaClass.simpleName}")
+                _state.value = BandConnectionState.Error
+            }
     }
 
     private fun isLikelyXiaomiBand(name: String) =
@@ -120,7 +173,7 @@ class BandScanner(context: Context) {
 
     @SuppressLint("MissingPermission")
     fun stopScan() {
-        scanCallback?.let { scanner?.stopScan(it) }
+        scanCallback?.let { runCatching { scanner?.stopScan(it) } }
         scanCallback = null
         if (_state.value == BandConnectionState.Scanning) _state.value = BandConnectionState.Idle
     }
@@ -136,14 +189,15 @@ class BandScanner(context: Context) {
             MiitTestLog.add("Connect failed: unable to resolve Bluetooth device")
             return
         }
-        if (authKey == null || authKey.size != 16) {
+        val key = authKey ?: activeAuthKey
+        if (key == null || key.size != 16) {
             _state.value = BandConnectionState.Error
             MiitTestLog.add("Connect rejected: valid 16-byte Xiaomi auth key required")
             return
         }
         stopScan()
         activeAddress = remote.address
-        activeAuthKey = authKey.copyOf()
+        activeAuthKey = key.copyOf()
         pendingBondDevice = device
         _state.value = BandConnectionState.Connecting
         MiitTestLog.add("Connect requested: ${device.name} ${device.address}; bond=${bondName(remote.bondState)}; transport=RFCOMM/SPP")
@@ -160,7 +214,7 @@ class BandScanner(context: Context) {
         if (manager == null) { startDirectBond(device); return }
         val filter = if (device.type == BluetoothDevice.DEVICE_TYPE_CLASSIC)
             BluetoothDeviceFilter.Builder().setAddress(device.address).build()
-        else BluetoothLeDeviceFilter.Builder().setScanFilter(ScanFilter.Builder().setDeviceAddress(device.address).build()).build()
+        else BluetoothLeDeviceFilter.Builder().setScanFilter(android.bluetooth.le.ScanFilter.Builder().setDeviceAddress(device.address).build()).build()
         val request = AssociationRequest.Builder().addDeviceFilter(filter).setSingleDevice(true).build()
         runCatching {
             manager.associate(request, object : CompanionDeviceManager.Callback() {
@@ -168,12 +222,12 @@ class BandScanner(context: Context) {
                     activity?.startIntentSenderForResult(chooserLauncher, COMPANION_REQUEST_CODE, null, 0, 0, 0)
                 }
                 override fun onFailure(error: CharSequence?) {
-                    MiitTestLog.add("Xiaomi pairing: Companion association failed: ${error ?: "unknown"}; falling back to Android bond")
+                    MiitTestLog.add("Xiaomi pairing: Companion association failed: ${error ?: "unknown"}; using Android bond")
                     startDirectBond(device)
                 }
             }, null)
         }.onFailure {
-            MiitTestLog.add("Xiaomi pairing: Companion API error ${it.javaClass.simpleName}; falling back to Android bond")
+            MiitTestLog.add("Xiaomi pairing: Companion API error ${it.javaClass.simpleName}; using Android bond")
             startDirectBond(device)
         }
     }
@@ -183,6 +237,8 @@ class BandScanner(context: Context) {
         if (resultCode != CompanionDeviceManager.RESULT_OK) {
             _state.value = BandConnectionState.Error
             pendingBondDevice = null; activeAddress = null; activeAuthKey = null
+            automaticMode = false
+            MiitTestLog.add("Automatic pairing was not completed; manual auth-key fallback remains available")
             return
         }
         val selected = data?.getParcelableExtra(CompanionDeviceManager.EXTRA_DEVICE, BluetoothDevice::class.java)
@@ -203,8 +259,10 @@ class BandScanner(context: Context) {
         val started = runCatching { device.createBond() }.getOrDefault(false)
         MiitTestLog.add("createBond() returned: $started")
         if (!started && device.bondState != BluetoothDevice.BOND_BONDING) {
+            automaticMode = false
             _state.value = BandConnectionState.Error
             pendingBondDevice = null; activeAddress = null; activeAuthKey = null
+            MiitTestLog.add("Automatic connection failed before Xiaomi authentication; manual auth-key fallback available")
         }
     }
 
@@ -223,10 +281,15 @@ class BandScanner(context: Context) {
             onState = { newState ->
                 _state.value = newState
                 when (newState) {
-                    BandConnectionState.Authenticated -> updateConnected(device.address, true, true)
+                    BandConnectionState.Authenticated -> {
+                        automaticMode = false
+                        updateConnected(device.address, true, true)
+                    }
                     BandConnectionState.Error, BandConnectionState.Disconnected -> {
                         updateConnected(device.address, false, false)
                         activeAddress = null; activeAuthKey = null
+                        automaticMode = false
+                        MiitTestLog.add("Automatic connection failed; manual auth-key fallback is available")
                     }
                     else -> Unit
                 }
@@ -287,6 +350,7 @@ class BandScanner(context: Context) {
 
     fun close() {
         stopScan(); runCatching { appContext.unregisterReceiver(bondReceiver) }; spp?.close(); spp = null
+        worker.shutdownNow()
         if (activeScanner === this) activeScanner = null
         activeAddress = null; activeAuthKey = null; pendingBondDevice = null
     }
