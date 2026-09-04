@@ -87,9 +87,16 @@ fun MiitWatchFaceEditor(
     var previewMode by remember { mutableStateOf(false) }
     var aodEnabled by remember { mutableStateOf(false) }
 
-    fun addElement(type: EditorElementType, preview: String) {
+    fun addElement(type: EditorElementType) {
         val id = nextId++
-        elements += EditorElement(id, type, preview, 50f, 50f, if (type == EditorElementType.TIME) 36f else 18f)
+        elements += EditorElement(
+            id = id,
+            type = type,
+            preview = livePreview(type, device),
+            x = 50f,
+            y = 50f,
+            size = if (type == EditorElementType.TIME) 36f else 18f
+        )
         selectedId = id
     }
 
@@ -237,35 +244,35 @@ private fun SubToolBar(
 ) {
     val items = when (category) {
         ToolCategory.ADD -> listOf(
-            SubAction("◷", "Time") { onAdd(EditorElementType.TIME, "12:45") },
-            SubAction("D", "Date") { onAdd(EditorElementType.DATE, "03 Sep") },
-            SubAction("♥", "Heart") { onAdd(EditorElementType.HEART_RATE, "72") },
-            SubAction("O₂", "SpO₂") { onAdd(EditorElementType.SPO2, "98%") },
-            SubAction("↟", "Steps") { onAdd(EditorElementType.STEPS, "6,421") },
-            SubAction("▣", "Battery") { onAdd(EditorElementType.BATTERY, "86%") },
-            SubAction("Cal", "Calories") { onAdd(EditorElementType.CALORIES, "482") },
-            SubAction("↗", "Distance") { onAdd(EditorElementType.DISTANCE, "4.8") }
+            SubAction("◷", "Time") { onAdd(EditorElementType.TIME) },
+            SubAction("D", "Date") { onAdd(EditorElementType.DATE) },
+            SubAction("♥", "Heart") { onAdd(EditorElementType.HEART_RATE) },
+            SubAction("O₂", "SpO₂") { onAdd(EditorElementType.SPO2) },
+            SubAction("↟", "Steps") { onAdd(EditorElementType.STEPS) },
+            SubAction("▣", "Battery") { onAdd(EditorElementType.BATTERY) },
+            SubAction("Cal", "Calories") { onAdd(EditorElementType.CALORIES) },
+            SubAction("↗", "Distance") { onAdd(EditorElementType.DISTANCE) }
         )
         ToolCategory.TEXT -> listOf(
-            SubAction("T", "Text") { onAdd(EditorElementType.TEXT, "Custom text") },
+            SubAction("T", "Text") { onAdd(EditorElementType.TEXT) },
             SubAction("D", "Date") { onAdd(EditorElementType.DATE, "03 Sep") },
-            SubAction("W", "Weekday") { onAdd(EditorElementType.WEEKDAY, "Thu") }
+            SubAction("W", "Weekday") { onAdd(EditorElementType.WEEKDAY) }
         )
         ToolCategory.DATA -> listOf(
             SubAction("♥", "Heart") { onAdd(EditorElementType.HEART_RATE, "72") },
             SubAction("O₂", "SpO₂") { onAdd(EditorElementType.SPO2, "98%") },
             SubAction("↟", "Steps") { onAdd(EditorElementType.STEPS, "6,421") },
-            SubAction("☾", "Sleep") { onAdd(EditorElementType.SLEEP, "7h 32m") },
-            SubAction("⌂", "Weather") { onAdd(EditorElementType.WEATHER, "28°") },
+            SubAction("☾", "Sleep") { onAdd(EditorElementType.SLEEP) },
+            SubAction("⌂", "Weather") { onAdd(EditorElementType.WEATHER) },
             SubAction("▣", "Battery") { onAdd(EditorElementType.BATTERY, "86%") }
         )
         ToolCategory.SHAPE -> listOf(
-            SubAction("○", "Circle") { onAdd(EditorElementType.CIRCLE, "○") },
-            SubAction("□", "Rect") { onAdd(EditorElementType.RECTANGLE, "□") },
-            SubAction("／", "Line") { onAdd(EditorElementType.LINE, "—") },
-            SubAction("◔", "Arc") { onAdd(EditorElementType.ARC, "◔") }
+            SubAction("○", "Circle") { onAdd(EditorElementType.CIRCLE) },
+            SubAction("□", "Rect") { onAdd(EditorElementType.RECTANGLE) },
+            SubAction("／", "Line") { onAdd(EditorElementType.LINE) },
+            SubAction("◔", "Arc") { onAdd(EditorElementType.ARC) }
         )
-        ToolCategory.MEDIA -> listOf(SubAction("▧", "Image") { onAdd(EditorElementType.IMAGE, "Image") })
+        ToolCategory.MEDIA -> listOf(SubAction("▧", "Image") { onAdd(EditorElementType.IMAGE) })
         ToolCategory.LAYERS -> listOf(
             SubAction("↑", "Front") { onLayerAction("front") },
             SubAction("↓", "Back") { onLayerAction("back") },
@@ -427,3 +434,23 @@ private fun serializeElements(elements: List<EditorElement>): String =
 
 private fun jsonEscape(value: String): String =
     value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+
+private fun livePreview(type: EditorElementType, device: BandDevice?): String = when (type) {
+    EditorElementType.TIME -> java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+    EditorElementType.DATE -> java.text.SimpleDateFormat("dd MMM", java.util.Locale.getDefault()).format(java.util.Date())
+    EditorElementType.WEEKDAY -> java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault()).format(java.util.Date())
+    EditorElementType.HEART_RATE -> device?.heartRate?.let { "♥ $it" } ?: "♥"
+    EditorElementType.BATTERY -> device?.batteryPercentage?.let { "$it%" } ?: "▣"
+    EditorElementType.SPO2 -> "O₂"
+    EditorElementType.STEPS -> "↟"
+    EditorElementType.CALORIES -> "Cal"
+    EditorElementType.DISTANCE -> "↗"
+    EditorElementType.SLEEP -> "☾"
+    EditorElementType.WEATHER -> "⌂"
+    EditorElementType.TEXT -> "Text"
+    EditorElementType.IMAGE -> "Image"
+    EditorElementType.CIRCLE -> "○"
+    EditorElementType.RECTANGLE -> "□"
+    EditorElementType.LINE -> "—"
+    EditorElementType.ARC -> "◔"
+}
