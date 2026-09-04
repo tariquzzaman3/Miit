@@ -112,34 +112,74 @@ object MiFitnessAuthKeyExtractor {
      */
     private fun extractDeviceRecords(text: String): List<DeviceRecord> {
         val records = mutableListOf<DeviceRecord>()
-        val anchor = Regex("""(?s)"deviceInfo"\s*:\s*\{""")
+        val anchor = Regex("""(?s)"deviceInfo"\\s*:\\s*\\{""")
         anchor.findAll(text).forEach { match ->
-            val window = text.substring(match.range.first, minOf(text.length, match.range.first + 12000))
-            val model = Regex("""(?s)"model"\s*:\s*"([^"]+)"""").find(window)?.groupValues?.get(1)
-            val did = Regex("""(?s)"did"\s*:\s*"([^"]+)"""").find(window)?.groupValues?.get(1)
-            val mac = Regex("""(?s)"mac"\s*:\s*"([^"]+)"""").find(window)?.groupValues?.get(1)
-            val detail = Regex("""(?s)"detail"\s*:\s*\{(.*?)\}""").find(window)?.groupValues?.get(1).orEmpty()
+            val deviceInfo = extractBalancedObject(text, match.range.last) ?: return@forEach
+            val device = extractBalancedObjectAfter(deviceInfo, "device")
+            val detail = device?.let { extractBalancedObjectAfter(it, "detail") }
 
-            val authKey = Regex("""(?i)"authKey"\s*:\s*"([0-9a-f]{32})"""").find(detail)?.groupValues?.get(1)
-            val encryptKey = Regex("""(?i)"encryptKey"\s*:\s*"([0-9a-f]{32})"""").find(detail)?.groupValues?.get(1)
-            val token = Regex("""(?i)"token"\s*:\s*"([0-9a-f]{32})"""").find(detail)?.groupValues?.get(1)
+            val model = firstString(deviceInfo, "model")
+            val did = firstString(deviceInfo, "did")
+            val mac = firstString(deviceInfo, "mac")
+                ?: device?.let { firstString(it, "mac") }
 
-            // Priority: explicit authKey, otherwise encryptKey, otherwise token.
+            val detailText = detail ?: deviceInfo
+            val authKey = hexValue(detailText, "authKey")
+            val encryptKey = hexValue(detailText, "encryptKey")
+            val token = hexValue(detailText, "token")
+
             val key = authKey ?: encryptKey ?: token
             records += DeviceRecord(key?.lowercase(), model, mac, did)
         }
 
-        // Fallback for logs that do not contain the enclosing deviceInfo object.
         if (records.isEmpty()) {
-            val key = Regex("""(?i)"(?:authKey|encryptKey|token)"\s*:\s*"([0-9a-f]{32})"""")
+            val key = Regex("""(?i)"(?:authKey|encryptKey|token)"\\s*:\\s*"([0-9a-f]{32})"""")
                 .findAll(text)
                 .lastOrNull()
                 ?.groupValues?.get(1)
                 ?.lowercase()
             if (key != null) records += DeviceRecord(key, null, null, null)
         }
-
         return records
+    }
+
+    private fun firstString(json: String, field: String): String? =
+        Regex("""(?s)" + field + """\\s*:\\s*"([^"]*)"""")
+            .find(json)?.groupValues?.getOrNull(1)
+
+    private fun hexValue(json: String, field: String): String? =
+        Regex("""(?i)" + field + """\\s*:\\s*"([0-9a-f]{32})"""")
+            .find(json)?.groupValues?.getOrNull(1)
+
+    private fun extractBalancedObjectAfter(text: String, field: String): String? {
+        val marker = Regex("""(?s)" + field + """\\s*:\\s*\\{""").find(text) ?: return null
+        return extractBalancedObject(text, marker.range.last)
+    }
+
+    private fun extractBalancedObject(text: String, openingBraceEnd: Int): String? {
+        val brace = text.indexOf('{', openingBraceEnd)
+        if (brace < 0) return null
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for (i in brace until text.length) {
+            val ch = text[i]
+            if (inString) {
+                if (escaped) escaped = false
+                else if (ch == '\\') escaped = true
+                else if (ch == '"') inString = false
+                continue
+            }
+            when (ch) {
+                '"' -> inString = true
+                '{' -> depth++
+                '}' -> {
+                    depth--
+                    if (depth == 0) return text.substring(brace, i + 1)
+                }
+            }
+        }
+        return null
     }
 
     /** Reads the user-selected Mi Fitness ZIP first, then falls back to plain text. */
