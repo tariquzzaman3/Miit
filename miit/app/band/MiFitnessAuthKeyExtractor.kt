@@ -28,29 +28,34 @@ object MiFitnessAuthKeyExtractor {
 
     fun find(context: Context): List<Candidate> {
         val candidates = linkedMapOf<String, Candidate>()
+
         fun inspect(text: String, source: String) {
             if (text.isBlank()) return
-            val deviceHint = devicePatterns.firstNotNullOfOrNull { it.find(text)?.groupValues?.getOrNull(1) }
-            keyPatterns.forEach { pattern ->
-                pattern.findAll(text).forEach { match ->
-                    val key = match.groupValues.last().lowercase()
-                    if (key.matches(Regex("[0-9a-f]{32}"))) {
-                        candidates.putIfAbsent(key, Candidate(key, source, deviceHint))
-                    }
+            extractDeviceRecords(text).forEach { record ->
+                val model = record.model
+                val key = record.key
+                if (key != null) {
+                    candidates.putIfAbsent(
+                        key,
+                        Candidate(
+                            key = key,
+                            source = source,
+                            deviceHint = model ?: record.mac ?: record.did
+                        )
+                    )
                 }
             }
         }
 
-        // Primary automatic route requested by MIIT:
-        // Download/wearablelog/<timestamp>log.zip -> scan every file inside the ZIP.
+        // Fixed parent folder: Download/wearablelog/
         val wearableLog = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             .resolve("wearablelog")
         if (wearableLog.isDirectory) {
             scanDirectory(wearableLog) { text, source -> inspect(text, source) }
         }
 
-        // Android 10+ MediaStore route. This is important on Android 15 where direct
-        // filesystem access to Downloads subfolders may be restricted.
+        // Android 10+ shared Downloads. Filename is deliberately ignored:
+        // every ZIP in Download/wearablelog is eligible.
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             val resolver = context.contentResolver
             val projection = arrayOf(
@@ -72,7 +77,6 @@ object MiFitnessAuthKeyExtractor {
                     while (cursor.moveToNext()) {
                         val name = cursor.getString(nameCol).orEmpty()
                         val path = cursor.getString(pathCol).orEmpty()
-                        // Match the actual Mi Fitness export folder, not arbitrary ZIPs.
                         if (!path.replace('\\', '/').contains("Download/wearablelog/", true)) continue
                         if (!name.endsWith(".zip", true)) continue
                         val uri = Uri.withAppendedPath(
@@ -80,14 +84,62 @@ object MiFitnessAuthKeyExtractor {
                             cursor.getLong(idCol).toString()
                         )
                         resolver.openInputStream(uri)?.use { input ->
-                            inspectStream(input, name, "Download/wearablelog/$name") { text, source -> inspect(text, source) }
+                            inspectStream(input, name, "Download/wearablelog/$name") { text, source ->
+                                inspect(text, source)
+                            }
                         }
                     }
                 }
+            }.onFailure {
+                MiitTestLog.add("Mi Fitness Download scan error: " + it.javaClass.simpleName)
             }
         }
 
         return candidates.values.toList()
+    }
+
+    private data class DeviceRecord(
+        val key: String?,
+        val model: String?,
+        val mac: String?,
+        val did: String?
+    )
+
+    /**
+     * Mi Fitness 3.x exports deviceInfo as JSON embedded in a text log.
+     * For each embedded device record, authKey may be null; encryptKey/token
+     * are the usable 32-hex pairing secret seen in current exports.
+     */
+    private fun extractDeviceRecords(text: String): List<DeviceRecord> {
+        val records = mutableListOf<DeviceRecord>()
+        val anchor = Regex("""(?s)"deviceInfo"\s*:\s*\{""")
+        anchor.findAll(text).forEach { match ->
+            val window = text.substring(match.range.first, minOf(text.length, match.range.first + 12000))
+            val model = Regex("""(?s)"model"\s*:\s*"([^"]+)"""").find(window)?.groupValues?.get(1)
+            val did = Regex("""(?s)"did"\s*:\s*"([^"]+)"""").find(window)?.groupValues?.get(1)
+            val mac = Regex("""(?s)"mac"\s*:\s*"([^"]+)"""").find(window)?.groupValues?.get(1)
+            val detail = Regex("""(?s)"detail"\s*:\s*\{(.*?)\}""").find(window)?.groupValues?.get(1).orEmpty()
+
+            val authKey = Regex("""(?i)"authKey"\s*:\s*"([0-9a-f]{32})"""").find(detail)?.groupValues?.get(1)
+            val encryptKey = Regex("""(?i)"encryptKey"\s*:\s*"([0-9a-f]{32})"""").find(detail)?.groupValues?.get(1)
+            val token = Regex("""(?i)"token"\s*:\s*"([0-9a-f]{32})"""").find(detail)?.groupValues?.get(1)
+
+            // Priority: explicit authKey, otherwise encryptKey, otherwise token.
+            val key = authKey ?: encryptKey ?: token
+            records += DeviceRecord(key?.lowercase(), model, mac, did)
+        }
+
+        // Fallback for logs that do not contain the enclosing deviceInfo object.
+        if (records.isEmpty()) {
+            val key = Regex("""(?i)"(?:authKey|encryptKey|token)"\s*:\s*"([0-9a-f]{32})"""")
+                .findAll(text)
+                .lastOrNull()
+                ?.groupValues?.get(1)
+                ?.lowercase()
+            if (key != null) records += DeviceRecord(key, null, null, null)
+        }
+
+        return records
     }
 
     /** Reads the user-selected Mi Fitness ZIP first, then falls back to plain text. */
