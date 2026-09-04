@@ -109,6 +109,7 @@ private fun MiitApp() {
     var authCandidates by remember { mutableStateOf<List<MiFitnessAuthKeyExtractor.Candidate>>(emptyList()) }
     var connectedBand by remember { mutableStateOf<BandDevice?>(null) }
     var automaticConnection by remember { mutableStateOf(false) }
+    var automaticKeyIndex by remember { mutableStateOf(0) }
     var editingDisplay by remember { mutableStateOf<BandDisplay?>(null) }
     var screen by remember { mutableStateOf(MiitScreen.CONNECTION) }
     var showHelp by remember { mutableStateOf(false) }
@@ -128,9 +129,11 @@ private fun MiitApp() {
                 if (startAutomatically) scanner.startScan()
             }
             else -> {
-                automaticConnection = false
-                authCandidates = found
-                authStatus = "Multiple possible keys found. Choose the matching key."
+                authCandidates = found.distinctBy { it.key }
+                automaticKeyIndex = 0
+                automaticConnection = startAutomatically
+                authStatus = if (authCandidates.size == 1) "One auth key found ✓ Connecting automatically…" else "Found " + authCandidates.size + " unique keys. MIIT will try them automatically…"
+                if (startAutomatically) scanner.startScan()
             }
         }
     }
@@ -144,26 +147,29 @@ private fun MiitApp() {
         }
     }
 
-    LaunchedEffect(devices, automaticConnection, authKeyText, connectionState) {
-        if (automaticConnection &&
-            authKeyText.length == 32 &&
-            devices.isNotEmpty() &&
-            connectionState == BandConnectionState.Scanning
-        ) {
-            val key = AuthKeyParser.parse(authKeyText)
-            val target = devices.firstOrNull()
-            if (key != null && target != null) {
-                automaticConnection = false
-                authStatus = "Connecting automatically to " + target.name + "…"
+    LaunchedEffect(devices, automaticConnection, authCandidates, automaticKeyIndex, connectionState) {
+        if (!automaticConnection || authCandidates.isEmpty()) return@LaunchedEffect
+        val target = devices.firstOrNull()
+        val candidate = authCandidates.getOrNull(automaticKeyIndex)
+        if (target != null && candidate != null && connectionState == BandConnectionState.Scanning) {
+            val key = AuthKeyParser.parse(candidate.key)
+            if (key != null) {
+                authKeyText = candidate.key
+                authStatus = "Trying automatic key " + (automaticKeyIndex + 1) + "/" + authCandidates.size + "…"
                 scanner.connect(target, key)
             }
-        }
-        if (automaticConnection && connectionState == BandConnectionState.Error) {
-            automaticConnection = false
-            authStatus = "Automatic connection failed. Use Manual fallback."
+        } else if (connectionState == BandConnectionState.Error) {
+            val next = automaticKeyIndex + 1
+            if (next < authCandidates.size) {
+                automaticKeyIndex = next
+                authStatus = "Previous key did not authenticate. Trying the next key automatically…"
+                scanner.startScan()
+            } else {
+                automaticConnection = false
+                authStatus = "Automatic connection could not authenticate this Band. Use the Manual fallback."
+            }
         }
     }
-
     val authenticated = devices.firstOrNull { it.authenticated }
     LaunchedEffect(authenticated) {
         if (authenticated != null) {
@@ -232,19 +238,7 @@ private fun MiitApp() {
     }
 
     if (showHelp) AuthKeyInstructionsDialog(onDismiss = { showHelp = false })
-    if (authCandidates.size > 1) {
-        AuthKeyCandidatesDialog(
-            candidates = authCandidates,
-            onSelect = {
-                authKeyText = it.key
-                prefs.edit().putString("auth_key", it.key).apply()
-                authCandidates = emptyList()
-                authStatus = "Auth key selected ✓"
-            },
-            onDismiss = { authCandidates = emptyList() }
-        )
-    }
-}
+    // Multiple extracted keys are tested automatically.\n}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
