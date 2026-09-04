@@ -90,7 +90,7 @@ object MiFitnessAuthKeyExtractor {
         return candidates.values.toList()
     }
 
-    /** Scans a ZIP/log selected through Android's document picker. */
+    /** Reads the user-selected Mi Fitness ZIP first, then falls back to plain text. */
     fun findFromUri(context: Context, uri: Uri): List<Candidate> {
         val candidates = linkedMapOf<String, Candidate>()
         fun inspect(text: String, source: String) {
@@ -98,18 +98,50 @@ object MiFitnessAuthKeyExtractor {
             val deviceHint = devicePatterns.firstNotNullOfOrNull { it.find(text)?.groupValues?.getOrNull(1) }
             keyPatterns.forEach { pattern ->
                 pattern.findAll(text).forEach { match ->
-                    val key = match.groupValues.last().lowercase()
+                    val key = match.groupValues.last().lowercase().removePrefix("0x")
                     if (key.matches(Regex("[0-9a-f]{32}"))) {
                         candidates.putIfAbsent(key, Candidate(key, source, deviceHint))
                     }
                 }
             }
+
+            // Mi Fitness commonly writes the key as token=... inside Transfer.device.log.
+            // Prefer the last occurrence because logs can contain several pairing records.
+            Regex("""(?i)\b(?:token|authKey|encryptKey|huamiAuthKey)\s*=\s*(?:0x)?([0-9a-f]{32})\b""")
+                .findAll(text)
+                .lastOrNull()
+                ?.let { match ->
+                    val key = match.groupValues[1].lowercase()
+                    candidates.putIfAbsent(key, Candidate(key, source, deviceHint))
+                }
         }
+
+        // The previous implementation treated the document-picker URI as plain text
+        // because it used the synthetic name "selected-log". That cannot read a ZIP.
+        // Try the ZIP container directly; if it is not a ZIP, reopen it as text.
         runCatching {
             context.contentResolver.openInputStream(uri)?.use { input ->
-                inspectStream(input, "selected-log", uri.toString()) { text, source -> inspect(text, source) }
+                ZipInputStream(input.buffered()).use { zip ->
+                    var entry = zip.nextEntry
+                    var foundZipEntry = false
+                    while (entry != null) {
+                        foundZipEntry = true
+                        if (!entry.isDirectory) {
+                            val bytes = zip.readBytesLimited(8 * 1024 * 1024)
+                            inspect(bytes.toString(Charsets.UTF_8), uri.toString() + "!/" + entry.name)
+                        }
+                        zip.closeEntry()
+                        entry = zip.nextEntry
+                    }
+                    if (!foundZipEntry) throw java.util.zip.ZipException("empty archive")
+                }
+            }
+        }.recoverCatching {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                inspect(input.readBytesLimited(16 * 1024 * 1024).toString(Charsets.UTF_8), uri.toString())
             }
         }
+
         return candidates.values.toList()
     }
 
