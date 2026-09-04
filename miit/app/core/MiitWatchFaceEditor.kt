@@ -3,6 +3,7 @@ package com.miit.app
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -77,11 +78,7 @@ fun MiitWatchFaceEditor(
         mutableStateListOf<EditorElement>().apply {
             // Never fabricate data over an existing band watchface/menu item.
             // New projects may start with a small editable starter face.
-            if (display == null) {
-                add(EditorElement(1, EditorElementType.TIME, "12:45", 50f, 34f, 38f))
-                add(EditorElement(2, EditorElementType.DATE, "03 Sep", 50f, 48f, 16f))
-                add(EditorElement(3, EditorElementType.STEPS, "6,421", 50f, 61f, 16f))
-            }
+            // New projects start empty. Preview values are supplied only when the device actually reports them.
         }
     }
     var nextId by remember(display?.stableId) { mutableIntStateOf(elements.maxOfOrNull { it.id }?.plus(1) ?: 1) }
@@ -295,12 +292,7 @@ private data class SubAction(val icon: String, val title: String, val onClick: (
 @Composable
 private fun ToolGlyph(icon: String, description: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(38.dp).pointerInput(description) {
-            detectDragGestures(
-                onDragStart = { onClick() },
-                onDrag = { change, _ -> change.consume() }
-            )
-        },
+        Modifier.size(38.dp).clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Text(icon, color = Color.White, fontSize = 22.sp)
@@ -314,13 +306,9 @@ private fun ToolCell(icon: String, title: String, selected: Boolean, onClick: ()
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
-            Modifier.size(36.dp).background(if (selected) Color(0xFF3E7BFF) else Color.Transparent, RoundedCornerShape(10.dp))
-                .pointerInput(title) {
-                    detectDragGestures(
-                        onDragStart = { onClick() },
-                        onDrag = { change, _ -> change.consume() }
-                    )
-                },
+            Modifier.size(36.dp)
+                .background(if (selected) Color(0xFF3E7BFF) else Color.Transparent, RoundedCornerShape(10.dp))
+                .clickable(onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
             Text(icon, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -393,9 +381,7 @@ private fun SelectedElementBar(
         Text(selected?.type?.name ?: "Nothing selected", color = Color.White, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 4.dp))
         listOf("−" to { onChangeSize(-2f) }, "+" to { onChangeSize(2f) }, "Export" to onExport, "Band" to onBand, "×" to onDelete).forEach { (label, action) ->
             Box(
-                Modifier.size(44.dp).background(Color(0xFF27282D), RoundedCornerShape(10.dp)).pointerInput(label) {
-                    detectDragGestures(onDragStart = { action() }, onDrag = { change, _ -> change.consume() })
-                },
+                Modifier.size(44.dp).background(Color(0xFF27282D), RoundedCornerShape(10.dp)).clickable(onClick = action),
                 contentAlignment = Alignment.Center
             ) { Text(label, color = Color.White, fontSize = 12.sp) }
         }
