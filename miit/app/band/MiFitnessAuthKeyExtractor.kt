@@ -144,15 +144,15 @@ object MiFitnessAuthKeyExtractor {
     }
 
     private fun firstString(json: String, field: String): String? =
-        Regex("""(?s)" + field + """\\s*:\\s*"([^"]*)"""")
+        Regex("""(?s)"$field"\\s*:\\s*"([^"]*)"""")
             .find(json)?.groupValues?.getOrNull(1)
 
     private fun hexValue(json: String, field: String): String? =
-        Regex("""(?i)" + field + """\\s*:\\s*"([0-9a-f]{32})"""")
+        Regex("""(?i)"$field"\\s*:\\s*"([0-9a-f]{32})"""")
             .find(json)?.groupValues?.getOrNull(1)
 
     private fun extractBalancedObjectAfter(text: String, field: String): String? {
-        val marker = Regex("""(?s)" + field + """\\s*:\\s*\\{""").find(text) ?: return null
+        val marker = Regex("""(?s)"$field"\\s*:\\s*\\{""").find(text) ?: return null
         return extractBalancedObject(text, marker.range.last)
     }
 
