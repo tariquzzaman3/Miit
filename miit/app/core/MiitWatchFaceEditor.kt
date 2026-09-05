@@ -106,6 +106,20 @@ fun MiitWatchFaceEditor(
         selectedId = id
     }
 
+    if (editingTextId != 0) {
+        val item = elements.firstOrNull { it.id == editingTextId }
+        if (item != null) {
+            TextEditDialog(
+                initial = item.value,
+                onDismiss = { editingTextId = 0 },
+                onApply = { value ->
+                    applyElements(elements.map { if (it.id == editingTextId) it.copy(value = value) else it })
+                    editingTextId = 0
+                }
+            )
+        }
+    }
+
     if (previewMode) {
         FullPreview(
             elements = elements,
