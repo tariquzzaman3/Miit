@@ -115,6 +115,7 @@ fun MiitWatchFaceEditor(
             size = if (type == EditorElementType.TIME) 36f else 18f
         )
         selectedId = id
+        if (type == EditorElementType.TEXT) editingTextId = id
     }
 
     if (editingTextId != 0) {
