@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -124,6 +125,10 @@ fun MiitWatchFaceEditor(
     var sourcePicker by remember { mutableStateOf(false) }
     var imageTarget by remember { mutableIntStateOf(0) }
     var referencePath by remember(display?.stableId) { mutableStateOf(display?.previewPath) }
+    var layersOpen by remember { mutableStateOf(false) }
+    var referenceOpacity by remember { mutableStateOf(0.65f) }
+    var undoStack by remember { mutableStateOf<List<List<EditorElement>>>(emptyList()) }
+    var redoStack by remember { mutableStateOf<List<List<EditorElement>>>(emptyList()) }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null && imageTarget != 0) {
@@ -144,7 +149,13 @@ fun MiitWatchFaceEditor(
         imageTarget = 0
     }
 
+    fun snapshotBeforeChange() {
+        undoStack = (undoStack + listOf(elements.toList())).takeLast(40)
+        redoStack = emptyList()
+    }
+
     fun addElement(type: EditorElementType) {
+        snapshotBeforeChange()
         val id = nextId++
         elements += EditorElement(
             id = id,
@@ -200,7 +211,7 @@ fun MiitWatchFaceEditor(
         return
     }
 
-    Column(Modifier.fillMaxSize().background(Color(0xFF101114))) {
+    Column(Modifier.fillMaxSize().background(Color(0xFF101114)).statusBarsPadding()) {
         // Leave a clean safe area for the phone status bar/camera cut-out.
         Spacer(Modifier.height(14.dp))
         // Minimal editor header: icon-first, no Material button/card treatment.
