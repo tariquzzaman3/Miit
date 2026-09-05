@@ -844,6 +844,11 @@ private fun livePreview(type: EditorElementType, device: BandDevice?): String = 
     EditorElementType.WEATHER -> "⌂"
     EditorElementType.TEXT -> "Text"
     EditorElementType.IMAGE -> "Image"
+    EditorElementType.DIGITAL_NUMBER -> dataSourcePlaceholder("Number")
+    EditorElementType.ANALOG_CLOCK -> ""
+    EditorElementType.ARC_PROGRESS -> ""
+    EditorElementType.LINE_PROGRESS -> ""
+    EditorElementType.CONTAINER -> ""
     EditorElementType.CIRCLE -> "○"
     EditorElementType.RECTANGLE -> "□"
     EditorElementType.LINE -> "—"
