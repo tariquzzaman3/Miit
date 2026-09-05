@@ -62,7 +62,9 @@ private data class EditorElement(
     val size: Float = 24f,
     val color: Color = Color.White,
     val visible: Boolean = true,
-    val locked: Boolean = false
+    val locked: Boolean = false,
+    val bold: Boolean = false,
+    val alignment: String = "Center"
 )
 
 @Composable
