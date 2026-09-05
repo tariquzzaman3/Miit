@@ -150,6 +150,19 @@ fun MiitWatchFaceEditor(
         }
     }
 
+    if (sourcePicker) {
+        MiCreateSourceDialog(
+            onDismiss = { sourcePicker = false },
+            onSelect = { source ->
+                val index = elements.indexOfFirst { it.id == selectedId }
+                if (index >= 0) {
+                    elements[index] = elements[index].copy(preview = source)
+                }
+                sourcePicker = false
+            }
+        )
+    }
+
     if (editingTextId != 0) {
         val item = elements.firstOrNull { it.id == editingTextId }
         if (item != null) {
@@ -428,6 +441,38 @@ private fun TextEditDialog(
         },
         confirmButton = { Button(onClick = { onApply(text) }) { Text("Apply") } },
         dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+private fun MiCreateSourceDialog(
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit
+) {
+    val sources = listOf(
+        "Hour", "Minute", "Second", "Day", "Week", "Month", "Year", "AM/PM",
+        "Battery charging status", "Battery percent", "Heart rate", "Interval heart rate",
+        "Current step count", "Step target", "Active Calorie", "Active calorie target value",
+        "Stand Up value", "Stand Up target", "Sleep score", "Remaining energy",
+        "Goal achieve of step", "Target calorie achieve", "Stand up target achieve",
+        "Atmospheric pressure", "Elevation value", "Psychological stress",
+        "Current temperature", "Current maximum temperature", "Current minimum temperature",
+        "Air Quality Index"
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Data source") },
+        text = {
+            LazyColumn {
+                items(sources) { source ->
+                    TextButton(
+                        onClick = { onSelect(source) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text(source) }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
     )
 }
 
