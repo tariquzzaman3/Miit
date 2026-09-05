@@ -211,6 +211,8 @@ fun MiitWatchFaceEditor(
                 elements = elements,
                 selectedId = selectedId,
                 profile = profile,
+                display = display,
+                device = device,
                 metadataOnly = display != null,
                 onSelect = { selectedId = it },
                 onMove = { id, dx, dy ->
@@ -443,7 +445,7 @@ private fun FullPreview(
             Text(if (aod) "AOD Preview" else "Watch Face Preview", color = Color.White, fontSize = 15.sp)
         }
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            WatchCanvasV2(elements, 0, profile, false, {}, { _, _, _ -> })
+            WatchCanvasV2(elements, 0, profile, null, null, false, {}, { _, _, _ -> })
         }
     }
 }
