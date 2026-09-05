@@ -46,7 +46,9 @@ object WatchfacePreviewResolver {
 
         for (file in ranked) {
             val candidate = extractPreview(context, file, model) ?: continue
-            if (candidate.width > 30 && candidate.height > 30) {
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(candidate.absolutePath, opts)
+            if (opts.outWidth > 30 && opts.outHeight > 30) {
                 return Result(candidate, file.absolutePath)
             }
         }
