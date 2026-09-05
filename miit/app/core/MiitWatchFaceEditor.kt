@@ -555,6 +555,6 @@ private fun renderElementValue(element: EditorElement, device: BandDevice?): Str
     ).format(java.util.Date())
     EditorElementType.HEART_RATE -> device?.heartRate?.let { "♥ $it" } ?: element.preview.ifBlank { "♥" }
     EditorElementType.BATTERY -> device?.batteryPercentage?.let { "$it%" } ?: element.preview.ifBlank { "▣" }
-    EditorElementType.CUSTOM_TEXT -> element.preview.ifBlank { "Text" }
+    EditorElementType.TEXT -> element.preview.ifBlank { "Text" }
     else -> element.preview.ifBlank { livePreview(element.type, device) }
 }
