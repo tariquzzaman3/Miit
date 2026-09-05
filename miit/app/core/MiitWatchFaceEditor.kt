@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -548,7 +549,6 @@ private fun TextEditDialog(
 }
 
 @Composable
-@Composable
 private fun MiCreateSourceDialog(
     onDismiss: () -> Unit,
     onSelect: (String) -> Unit
@@ -919,7 +919,7 @@ private fun EditorPropertiesDialog(
                                 EditorElementType.DATE -> listOf("DD", "DD/MM", "MM/DD", "DD MMM", "DD MMM YYYY")
                                 else -> listOf("EEE", "EEEE")
                             }
-                            items(presets) { preset -> FinalMiniButton(preset) { format = preset } }
+                            items(presets) { preset -> TextButton(onClick = { format = preset }) { Text(preset) } }
                         }
                     }
                 }
