@@ -105,7 +105,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun MiitApp() {
     val context = LocalContext.current
-    val scanner = remember { BandScanner(context) }
+    val scanner = remember { BandScanner.getInstance(context) }
     val devices by scanner.devices.collectAsState()
     val connectionState by scanner.state.collectAsState()
     val prefs = remember { context.getSharedPreferences("miit_pairing", Context.MODE_PRIVATE) }
@@ -176,17 +176,27 @@ private fun MiitApp() {
         }
     }
     val authenticated = devices.firstOrNull { it.authenticated }
-    LaunchedEffect(authenticated) {
-        if (authenticated != null) {
+    LaunchedEffect(authenticated, connectionState) {
+        if (authenticated != null && (connectionState == BandConnectionState.Authenticated || authenticated.connected)) {
             connectedBand = authenticated
             screen = MiitScreen.BAND
+        } else if (connectionState == BandConnectionState.Connecting ||
+            connectionState == BandConnectionState.Authenticating ||
+            connectionState == BandConnectionState.Authenticated
+        ) {
+            authenticated?.let { connectedBand = it }
         }
     }
 
     BackHandler(enabled = screen != MiitScreen.CONNECTION) {
         if (screen == MiitScreen.EDITOR) screen = MiitScreen.BAND
     }
-    DisposableEffect(Unit) { onDispose { scanner.close() } }
+    DisposableEffect(Unit) {
+        onDispose {
+            // Keep the process-scoped Xiaomi connection alive when the Activity leaves.
+            scanner.close()
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
         when (screen) {
