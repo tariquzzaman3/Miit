@@ -219,6 +219,19 @@ fun MiitWatchFaceEditor(
             aodEnabled = aodEnabled,
             onAodChange = { aodEnabled = it },
             onAdd = ::addElement,
+            onPickImage = {
+                val id = if (selectedId != 0) selectedId else nextId++
+                if (selectedId == 0) {
+                    elements += EditorElement(id, EditorElementType.IMAGE, "", 50f, 50f, 24f)
+                    selectedId = id
+                }
+                imageTarget = id
+                imagePicker.launch(arrayOf("image/*"))
+            },
+            onReference = {
+                imageTarget = -1
+                imagePicker.launch(arrayOf("image/*"))
+            },
             onModifySelected = { transform ->
                 val index = elements.indexOfFirst { it.id == selectedId }
                 if (index >= 0 && !elements[index].locked) elements[index] = transform(elements[index])
@@ -314,6 +327,8 @@ private fun SubToolBar(
     aodEnabled: Boolean,
     onAodChange: (Boolean) -> Unit,
     onAdd: (EditorElementType) -> Unit,
+    onPickImage: () -> Unit,
+    onReference: () -> Unit,
     onLayerAction: (String) -> Unit,
     modifier: Modifier,
     onModifySelected: ((EditorElement) -> EditorElement) -> Unit = {},
@@ -323,14 +338,14 @@ private fun SubToolBar(
 ) {
     val items = when (category) {
         ToolCategory.ADD -> listOf(
-            SubAction("◷", "Time") { onAdd(EditorElementType.TIME) },
-            SubAction("D", "Date") { onAdd(EditorElementType.DATE) },
-            SubAction("♥", "Heart") { onAdd(EditorElementType.HEART_RATE) },
-            SubAction("O₂", "SpO₂") { onAdd(EditorElementType.SPO2) },
-            SubAction("↟", "Steps") { onAdd(EditorElementType.STEPS) },
-            SubAction("▣", "Battery") { onAdd(EditorElementType.BATTERY) },
-            SubAction("Cal", "Calories") { onAdd(EditorElementType.CALORIES) },
-            SubAction("↗", "Distance") { onAdd(EditorElementType.DISTANCE) }
+            SubAction("▧", "Image") { onPickImage() },
+            SubAction("▤", "Image List") { onAdd(EditorElementType.IMAGE) },
+            SubAction("123", "Digital") { onAdd(EditorElementType.DIGITAL_NUMBER) },
+            SubAction("◷", "Analog") { onAdd(EditorElementType.ANALOG_CLOCK) },
+            SubAction("◔", "Arc") { onAdd(EditorElementType.ARC_PROGRESS) },
+            SubAction("━", "Line") { onAdd(EditorElementType.LINE_PROGRESS) },
+            SubAction("▢", "Container") { onAdd(EditorElementType.CONTAINER) },
+            SubAction("T", "Text") { onAdd(EditorElementType.TEXT) }
         )
         ToolCategory.TEXT -> listOf(
             SubAction("T", "Text") { onAdd(EditorElementType.TEXT) },
@@ -343,12 +358,19 @@ private fun SubToolBar(
             SubAction("R", "Right") { onModifySelected { it.copy(alignment = "Right", x = 88f) } }
         )
         ToolCategory.DATA -> listOf(
+            SubAction("Src", "Source") { sourcePicker = true },
+            SubAction("◷", "Hour") { onAdd(EditorElementType.DIGITAL_NUMBER) },
+            SubAction(":", "Minute") { onAdd(EditorElementType.DIGITAL_NUMBER) },
+            SubAction("D", "Day") { onAdd(EditorElementType.DATE) },
+            SubAction("M", "Month") { onAdd(EditorElementType.DIGITAL_NUMBER) },
+            SubAction("Y", "Year") { onAdd(EditorElementType.DIGITAL_NUMBER) },
             SubAction("♥", "Heart") { onAdd(EditorElementType.HEART_RATE) },
             SubAction("O₂", "SpO₂") { onAdd(EditorElementType.SPO2) },
             SubAction("↟", "Steps") { onAdd(EditorElementType.STEPS) },
+            SubAction("▣", "Battery") { onAdd(EditorElementType.BATTERY) },
+            SubAction("Cal", "Active Cal") { onAdd(EditorElementType.CALORIES) },
             SubAction("☾", "Sleep") { onAdd(EditorElementType.SLEEP) },
-            SubAction("⌂", "Weather") { onAdd(EditorElementType.WEATHER) },
-            SubAction("▣", "Battery") { onAdd(EditorElementType.BATTERY) }
+            SubAction("☁", "Temp") { onAdd(EditorElementType.WEATHER) }
         )
         ToolCategory.SHAPE -> listOf(
             SubAction("○", "Circle") { onAdd(EditorElementType.CIRCLE) },
@@ -356,7 +378,10 @@ private fun SubToolBar(
             SubAction("／", "Line") { onAdd(EditorElementType.LINE) },
             SubAction("◔", "Arc") { onAdd(EditorElementType.ARC) }
         )
-        ToolCategory.MEDIA -> listOf(SubAction("▧", "Image") { onAdd(EditorElementType.IMAGE) })
+        ToolCategory.MEDIA -> listOf(
+            SubAction("▧", "Photo") { onPickImage() },
+            SubAction("◎", "Reference") { onReference }
+        )
         ToolCategory.LAYERS -> listOf(
             SubAction("↑", "Front") { onLayerAction("front") },
             SubAction("↓", "Back") { onLayerAction("back") },
