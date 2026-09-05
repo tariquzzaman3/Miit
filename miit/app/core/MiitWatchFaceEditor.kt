@@ -302,8 +302,13 @@ private fun SubToolBar(
         )
         ToolCategory.TEXT -> listOf(
             SubAction("T", "Text") { onAdd(EditorElementType.TEXT) },
-            SubAction("D", "Date") { onAdd(EditorElementType.DATE) },
-            SubAction("W", "Weekday") { onAdd(EditorElementType.WEEKDAY) }
+            SubAction("✎", "Edit") { onEditText() },
+            SubAction("A+", "Size+") { onModifySelected { it.copy(size = (it.size + 2f).coerceAtMost(72f)) } },
+            SubAction("A−", "Size−") { onModifySelected { it.copy(size = (it.size - 2f).coerceAtLeast(8f)) } },
+            SubAction("B", "Bold") { onModifySelected { it.copy(bold = !it.bold) } },
+            SubAction("L", "Left") { onModifySelected { it.copy(alignment = "Left", x = 12f) } },
+            SubAction("C", "Center") { onModifySelected { it.copy(alignment = "Center", x = 50f) } },
+            SubAction("R", "Right") { onModifySelected { it.copy(alignment = "Right", x = 88f) } }
         )
         ToolCategory.DATA -> listOf(
             SubAction("♥", "Heart") { onAdd(EditorElementType.HEART_RATE) },
@@ -425,6 +430,7 @@ private fun WatchCanvasV2(
                         renderElementValue(element, device),
                         color = element.color,
                         fontSize = element.size.sp,
+                        fontWeight = if (element.bold || element.type == EditorElementType.TIME) FontWeight.Bold else FontWeight.Normal,
                         modifier = Modifier.padding(start = x, top = y).pointerInput(element.id) {
                             detectDragGestures { change, amount ->
                                 change.consume()
