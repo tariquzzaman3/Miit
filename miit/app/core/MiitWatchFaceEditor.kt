@@ -202,6 +202,22 @@ fun MiitWatchFaceEditor(
         }
     }
 
+    if (propertiesOpen) {
+        val selected = elements.firstOrNull { it.id == selectedId }
+        if (selected != null) {
+            EditorPropertiesDialog(
+                element = selected,
+                onDismiss = { propertiesOpen = false },
+                onApply = { updated ->
+                    snapshotBeforeChange()
+                    val index = elements.indexOfFirst { it.id == updated.id }
+                    if (index >= 0) elements[index] = updated
+                    propertiesOpen = false
+                }
+            )
+        }
+    }
+
     if (previewMode) {
         FullPreview(
             elements = elements,
@@ -384,7 +400,8 @@ fun MiitWatchFaceEditor(
                 selectedId = elements.firstOrNull()?.id ?: 0
             },
             onExport = { onAction("export") },
-            onBand = { onAction("band") }
+            onBand = { onAction("band") },
+            onProperties = { propertiesOpen = true }
         )
     }
 }
@@ -874,6 +891,56 @@ private fun SelectedElementBar(
             ) { Text(label, color = Color.White, fontSize = 12.sp) }
         }
     }
+}
+
+@Composable
+private fun EditorPropertiesDialog(
+    element: EditorElement,
+    onDismiss: () -> Unit,
+    onApply: (EditorElement) -> Unit
+) {
+    var size by remember(element.id) { mutableStateOf(element.size.toString()) }
+    var x by remember(element.id) { mutableStateOf(element.x.toString()) }
+    var y by remember(element.id) { mutableStateOf(element.y.toString()) }
+    var format by remember(element.id) { mutableStateOf(element.format) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Element properties") },
+        text = {
+            LazyColumn {
+                item { Text(element.type.name.replace('_', ' '), color = Color.Gray, fontSize = 11.sp) }
+                item { OutlinedTextField(x, { x = it }, label = { Text("X %") }, singleLine = true) }
+                item { OutlinedTextField(y, { y = it }, label = { Text("Y %") }, singleLine = true) }
+                item { OutlinedTextField(size, { size = it }, label = { Text("Size") }, singleLine = true) }
+                if (element.type == EditorElementType.TIME || element.type == EditorElementType.DATE || element.type == EditorElementType.WEEKDAY) {
+                    item { OutlinedTextField(format, { format = it }, label = { Text("Format") }, singleLine = true) }
+                    item {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            val presets = when (element.type) {
+                                EditorElementType.TIME -> listOf("H", "HH", "h", "hh", "H:mm", "HH:mm", "h:mm", "hh:mm", "HH:mm:ss")
+                                EditorElementType.DATE -> listOf("DD", "DD/MM", "MM/DD", "DD MMM", "DD MMM YYYY")
+                                else -> listOf("EEE", "EEEE")
+                            }
+                            items(presets) { preset -> FinalMiniButton(preset) { format = preset } }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                onApply(
+                    element.copy(
+                        x = x.toFloatOrNull()?.coerceIn(0f, 100f) ?: element.x,
+                        y = y.toFloatOrNull()?.coerceIn(0f, 100f) ?: element.y,
+                        size = size.toFloatOrNull()?.coerceIn(8f, 72f) ?: element.size,
+                        format = format
+                    )
+                )
+            }) { Text("Apply") }
+        },
+        dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 @Composable
