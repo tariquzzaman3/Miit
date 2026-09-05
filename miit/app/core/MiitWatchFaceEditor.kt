@@ -468,18 +468,43 @@ private fun WatchCanvasV2(
                 elements.filter { it.visible }.forEach { element ->
                     val x = (element.x / 100f * 166f).dp
                     val y = (element.y / 100f * ((190f * profile.height / profile.width) - 10f)).dp
-                    Text(
-                        renderElementValue(element, device),
-                        color = element.color,
-                        fontSize = element.size.sp,
-                        modifier = Modifier.padding(start = x, top = y).pointerInput(element.id) {
-                            detectDragGestures { change, amount ->
-                                change.consume()
-                                onSelect(element.id)
-                                onMove(element.id, amount.x / 1.66f, amount.y / 4.08f)
+                    if (element.type == EditorElementType.IMAGE && element.preview.isNotBlank()) {
+                        EditorImageElement(
+                            source = element.preview,
+                            x = x,
+                            y = y,
+                            selected = element.id == selectedId,
+                            onSelect = { onSelect(element.id) },
+                            onMove = { dx, dy -> onMove(element.id, dx, dy) }
+                        )
+                    } else if (element.type == EditorElementType.CIRCLE ||
+                        element.type == EditorElementType.RECTANGLE ||
+                        element.type == EditorElementType.LINE ||
+                        element.type == EditorElementType.ARC
+                    ) {
+                        EditorShapeElement(
+                            element = element,
+                            x = x,
+                            y = y,
+                            selected = element.id == selectedId,
+                            onSelect = { onSelect(element.id) },
+                            onMove = { dx, dy -> onMove(element.id, dx, dy) }
+                        )
+                    } else {
+                        Text(
+                            renderElementValue(element, device),
+                            color = element.color,
+                            fontSize = element.size.sp,
+                            fontWeight = if (element.bold || element.type == EditorElementType.TIME) FontWeight.Bold else FontWeight.Normal,
+                            modifier = Modifier.padding(start = x, top = y).pointerInput(element.id) {
+                                detectDragGestures { change, amount ->
+                                    change.consume()
+                                    onSelect(element.id)
+                                    onMove(element.id, amount.x / 1.66f, amount.y / 4.08f)
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
                 if (metadataOnly) {
                     Text(
@@ -496,6 +521,89 @@ private fun WatchCanvasV2(
                 Text("Metadata only — no demo values injected", color = Color(0xFF9AA0AA), fontSize = 10.sp)
             }
         }
+    }
+}
+
+@Composable
+private fun EditorImageElement(
+    source: String,
+    x: androidx.compose.ui.unit.Dp,
+    y: androidx.compose.ui.unit.Dp,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    onMove: (Float, Float) -> Unit
+) {
+    val context = LocalContext.current
+    var bitmap by remember(source) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(source) {
+        bitmap = withContext(Dispatchers.IO) {
+            runCatching {
+                if (source.startsWith("content://")) {
+                    context.contentResolver.openInputStream(Uri.parse(source))?.use {
+                        BitmapFactory.decodeStream(it)?.asImageBitmap()
+                    }
+                } else {
+                    BitmapFactory.decodeFile(source)?.asImageBitmap()
+                }
+            }.getOrNull()
+        }
+    }
+    Box(
+        Modifier
+            .padding(start = x, top = y)
+            .size(82.dp, 62.dp)
+            .background(if (selected) Color(0x553F78FF) else Color.Transparent, RoundedCornerShape(4.dp))
+            .pointerInput(source) {
+                detectDragGestures(
+                    onDragStart = { onSelect() },
+                    onDrag = { change, amount ->
+                        change.consume()
+                        onMove(amount.x / 1.66f, amount.y / 4.08f)
+                    }
+                )
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        if (bitmap != null) {
+            Image(bitmap!!, "Watch-face image", Modifier.fillMaxSize())
+        } else {
+            Text("Image", color = Color.Gray, fontSize = 9.sp)
+        }
+    }
+}
+
+@Composable
+private fun EditorShapeElement(
+    element: EditorElement,
+    x: androidx.compose.ui.unit.Dp,
+    y: androidx.compose.ui.unit.Dp,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    onMove: (Float, Float) -> Unit
+) {
+    Canvas(
+        Modifier
+            .padding(start = x, top = y)
+            .size(70.dp, 50.dp)
+            .pointerInput(element.id) {
+                detectDragGestures(
+                    onDragStart = { onSelect() },
+                    onDrag = { change, amount ->
+                        change.consume()
+                        onMove(amount.x / 1.66f, amount.y / 4.08f)
+                    }
+                )
+            }
+    ) {
+        val stroke = 2.dp.toPx()
+        when (element.type) {
+            EditorElementType.CIRCLE -> drawCircle(element.color, size.minDimension / 2f, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
+            EditorElementType.RECTANGLE -> drawRect(element.color, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
+            EditorElementType.LINE -> drawLine(element.color, Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), strokeWidth = stroke)
+            EditorElementType.ARC -> drawArc(element.color, -90f, 260f, false, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
+            else -> Unit
+        }
+        if (selected) drawRect(Color(0x663F78FF), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
     }
 }
 
