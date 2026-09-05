@@ -239,6 +239,7 @@ fun MiitWatchFaceEditor(
             onEditText = {
                 if (elements.firstOrNull { it.id == selectedId }?.type == EditorElementType.TEXT) editingTextId = selectedId
             },
+            onSourcePicker = { sourcePicker = true },
             onExport = { onAction("export") },
             onBand = { onAction("band") },
             onLayerAction = { action ->
@@ -329,6 +330,7 @@ private fun SubToolBar(
     onAdd: (EditorElementType) -> Unit,
     onPickImage: () -> Unit,
     onReference: () -> Unit,
+    onSourcePicker: () -> Unit,
     onLayerAction: (String) -> Unit,
     modifier: Modifier,
     onModifySelected: ((EditorElement) -> EditorElement) -> Unit = {},
@@ -358,7 +360,7 @@ private fun SubToolBar(
             SubAction("R", "Right") { onModifySelected { it.copy(alignment = "Right", x = 88f) } }
         )
         ToolCategory.DATA -> listOf(
-            SubAction("Src", "Source") { sourcePicker = true },
+            SubAction("Src", "Source") { onSourcePicker() },
             SubAction("◷", "Hour") { onAdd(EditorElementType.DIGITAL_NUMBER) },
             SubAction(":", "Minute") { onAdd(EditorElementType.DIGITAL_NUMBER) },
             SubAction("D", "Day") { onAdd(EditorElementType.DATE) },
