@@ -114,17 +114,6 @@ fun MiitWatchFaceEditor(
     var editingTextId by remember { mutableIntStateOf(0) }
     var referenceUri by remember(display?.stableId) { mutableStateOf<String?>(display?.previewPath) }
     var imageTarget by remember { mutableIntStateOf(0) }
-    var selectedImageId by remember { mutableIntStateOf(0) }
-
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null && selectedImageId != 0) {
-            val index = elements.indexOfFirst { it.id == selectedImageId }
-            if (index >= 0) {
-                elements[index] = elements[index].copy(preview = uri.toString())
-            }
-        }
-        selectedImageId = 0
-    }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
