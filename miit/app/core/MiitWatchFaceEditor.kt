@@ -316,7 +316,9 @@ private fun SubToolBar(
             SubAction("⌑", "Lock") { onLayerAction("lock") },
             SubAction("×", "Delete") { onLayerAction("delete") }
         )
+        ToolCategory.STYLE -> listOf(SubAction("W", "White") { onModifySelected { it.copy(color = Color.White) } }, SubAction("B", "Blue") { onModifySelected { it.copy(color = Color(0xFF55B7FF)) } }, SubAction("Y", "Yellow") { onModifySelected { it.copy(color = Color(0xFFFFD54F)) } }, SubAction("R", "Red") { onModifySelected { it.copy(color = Color(0xFFFF6B6B)) } }, SubAction("B+", "Bold") { onModifySelected { it.copy(bold = !it.bold) } })
         ToolCategory.AOD -> listOf(SubAction(if (aodEnabled) "●" else "○", if (aodEnabled) "AOD on" else "AOD off") { onAodChange(!aodEnabled) })
+        ToolCategory.EXPORT -> listOf(SubAction("⇩", "Save") { onExport() }, SubAction("✓", "Check") { onExport() }, SubAction("⌂", "Band") { onBand() })
     }
 
     Row(
