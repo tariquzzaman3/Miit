@@ -559,9 +559,8 @@ private fun WatchCanvasV2(
                     .height((190f * profile.height / profile.width).dp)
                     .background(Color.Black, RoundedCornerShape(34.dp))
             ) {
-                display?.previewPath?.let { preview ->
-                    val bitmap = remember(preview) { runCatching { BitmapFactory.decodeFile(preview)?.asImageBitmap() }.getOrNull() }
-                    if (bitmap != null) Image(bitmap, "Watch-face preview", Modifier.fillMaxSize())
+                referencePath?.let { preview ->
+                    EditorReferenceImage(preview, Modifier.fillMaxSize().alpha(0.65f))
                 }
                 elements.filter { it.visible }.forEach { element ->
                     val x = (element.x / 100f * 166f).dp
@@ -738,6 +737,26 @@ private fun EditorProgressLayer(
             drawArc(element.color, -90f, value * 360f, false, style = Stroke(4.dp.toPx()))
         }
     }
+}
+
+@Composable
+private fun EditorReferenceImage(source: String, modifier: Modifier) {
+    val context = LocalContext.current
+    var bitmap by remember(source) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(source) {
+        bitmap = withContext(Dispatchers.IO) {
+            runCatching {
+                if (source.startsWith("content://")) {
+                    context.contentResolver.openInputStream(Uri.parse(source))?.use {
+                        BitmapFactory.decodeStream(it)?.asImageBitmap()
+                    }
+                } else {
+                    BitmapFactory.decodeFile(source)?.asImageBitmap()
+                }
+            }.getOrNull()
+        }
+    }
+    bitmap?.let { Image(it, "Band display reference", modifier) }
 }
 
 @Composable
