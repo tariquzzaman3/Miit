@@ -113,6 +113,25 @@ fun MiitWatchFaceEditor(
     var imageTarget by remember { mutableIntStateOf(0) }
     var referencePath by remember(display?.stableId) { mutableStateOf(display?.previewPath) }
 
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && imageTarget != 0) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            if (imageTarget == -1) {
+                referencePath = uri.toString()
+            } else {
+                val index = elements.indexOfFirst { it.id == imageTarget }
+                if (index >= 0) {
+                    elements[index] = elements[index].copy(preview = uri.toString())
+                }
+            }
+        }
+        imageTarget = 0
+    }
+
     fun addElement(type: EditorElementType) {
         val id = nextId++
         elements += EditorElement(
@@ -125,6 +144,10 @@ fun MiitWatchFaceEditor(
         )
         selectedId = id
         if (type == EditorElementType.TEXT) editingTextId = id
+        if (type == EditorElementType.IMAGE) {
+            imageTarget = id
+            imagePicker.launch(arrayOf("image/*"))
+        }
     }
 
     if (editingTextId != 0) {
