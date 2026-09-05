@@ -144,6 +144,7 @@ fun MiitWatchFaceEditor(
         )
         selectedId = id
         if (type == EditorElementType.TEXT) editingTextId = id
+        if (type == EditorElementType.DIGITAL_NUMBER) sourcePicker = true
         if (type == EditorElementType.IMAGE) {
             imageTarget = id
             imagePicker.launch(arrayOf("image/*"))
@@ -255,6 +256,19 @@ fun MiitWatchFaceEditor(
             onSourcePicker = { sourcePicker = true },
             onExport = { onAction("export") },
             onBand = { onAction("band") },
+            onAi = {
+                val visible = elements.filter { it.visible }
+                if (visible.isNotEmpty()) {
+                    val count = visible.size
+                    var n = 0
+                    visible.forEach {
+                        val index = elements.indexOfFirst { e -> e.id == it.id }
+                        if (index >= 0) {
+                            elements[index] = elements[index].copy(x = 50f, y = if (count == 1) 50f else 10f + (84f / (count - 1)) * n++)
+                        }
+                    }
+                }
+            },
             onLayerAction = { action ->
                 val selected = elements.indexOfFirst { it.id == selectedId }
                 if (selected < 0) return@SubToolBar
@@ -374,18 +388,18 @@ private fun SubToolBar(
         )
         ToolCategory.DATA -> listOf(
             SubAction("Src", "Source") { onSourcePicker() },
-            SubAction("◷", "Hour") { onAdd(EditorElementType.DIGITAL_NUMBER) },
-            SubAction(":", "Minute") { onAdd(EditorElementType.DIGITAL_NUMBER) },
-            SubAction("D", "Day") { onAdd(EditorElementType.DATE) },
-            SubAction("M", "Month") { onAdd(EditorElementType.DIGITAL_NUMBER) },
-            SubAction("Y", "Year") { onAdd(EditorElementType.DIGITAL_NUMBER) },
-            SubAction("♥", "Heart") { onAdd(EditorElementType.HEART_RATE) },
+            SubAction("♥", "Heart") { onAdd(EditorElementType.DIGITAL_NUMBER) },
             SubAction("O₂", "SpO₂") { onAdd(EditorElementType.SPO2) },
             SubAction("↟", "Steps") { onAdd(EditorElementType.STEPS) },
             SubAction("▣", "Battery") { onAdd(EditorElementType.BATTERY) },
-            SubAction("Cal", "Active Cal") { onAdd(EditorElementType.CALORIES) },
-            SubAction("☾", "Sleep") { onAdd(EditorElementType.SLEEP) },
-            SubAction("☁", "Temp") { onAdd(EditorElementType.WEATHER) }
+            SubAction("Cal", "Active Cal") { onAdd(EditorElementType.DIGITAL_NUMBER) },
+            SubAction("%", "Goals") { onAdd(EditorElementType.DIGITAL_NUMBER) },
+            SubAction("☾", "Sleep") { onAdd(EditorElementType.DIGITAL_NUMBER) },
+            SubAction("⚡", "Charge") { onAdd(EditorElementType.DIGITAL_NUMBER) },
+            SubAction("°", "Temp") { onAdd(EditorElementType.DIGITAL_NUMBER) },
+            SubAction("≋", "Pressure") { onAdd(EditorElementType.DIGITAL_NUMBER) },
+            SubAction("↟", "Elevation") { onAdd(EditorElementType.DIGITAL_NUMBER) },
+            SubAction("☁", "Weather") { onAdd(EditorElementType.DIGITAL_NUMBER) }
         )
         ToolCategory.SHAPE -> listOf(
             SubAction("○", "Circle") { onAdd(EditorElementType.CIRCLE) },
@@ -406,6 +420,11 @@ private fun SubToolBar(
         )
         ToolCategory.STYLE -> listOf(SubAction("W", "White") { onModifySelected { it.copy(color = Color.White) } }, SubAction("B", "Blue") { onModifySelected { it.copy(color = Color(0xFF55B7FF)) } }, SubAction("Y", "Yellow") { onModifySelected { it.copy(color = Color(0xFFFFD54F)) } }, SubAction("R", "Red") { onModifySelected { it.copy(color = Color(0xFFFF6B6B)) } }, SubAction("B+", "Bold") { onModifySelected { it.copy(bold = !it.bold) } })
         ToolCategory.AOD -> listOf(SubAction(if (aodEnabled) "●" else "○", if (aodEnabled) "AOD on" else "AOD off") { onAodChange(!aodEnabled) })
+        ToolCategory.AI -> listOf(
+            SubAction("✧", "Arrange") { onAi() },
+            SubAction("◎", "Centre") { onAi() },
+            SubAction("✓", "Clean") { onAi() }
+        )
         ToolCategory.EXPORT -> listOf(SubAction("⇩", "Save") { onExport() }, SubAction("✓", "Check") { onExport() }, SubAction("⌂", "Band") { onBand() })
     }
 
@@ -568,7 +587,8 @@ private fun SelectedElementBar(
     onChangeSize: (Float) -> Unit,
     onDelete: () -> Unit,
     onExport: () -> Unit,
-    onBand: () -> Unit
+    onBand: () -> Unit,
+    onAi: () -> Unit = {}
 ) {
     Row(
         Modifier.fillMaxWidth().height(54.dp).background(Color(0xFF18191D)).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
