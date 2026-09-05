@@ -498,11 +498,6 @@ private fun SubToolBar(
         ToolCategory.AOD -> listOf(SubAction(if (aodEnabled) "●" else "○", if (aodEnabled) "AOD on" else "AOD off") { onAodChange(!aodEnabled) })
         ToolCategory.AI -> listOf(
             SubAction("✧", "Arrange") { onAi() },
-            SubAction("◎", "Centre") { onAi() },
-            SubAction("✓", "Clean") { onAi() }
-        )
-        ToolCategory.AI -> listOf(
-            SubAction("✧", "Arrange") { onAi() },
             SubAction("◎", "Center") { onAi() },
             SubAction("✓", "Clean") { onAi() }
         )
@@ -677,7 +672,7 @@ private fun WatchCanvasV2(
             Spacer(Modifier.height(8.dp))
             Text("${profile.width} × ${profile.height} px  •  ${profile.source}", color = Color.Gray, fontSize = 10.sp)
             if (metadataOnly) {
-                Text("Metadata only — no demo values injected", color = Color(0xFF9AA0AA), fontSize = 10.sp)
+                Text("Band metadata only — add a reference image to trace the original face", color = Color(0xFF9AA0AA), fontSize = 10.sp)
             }
         }
     }
