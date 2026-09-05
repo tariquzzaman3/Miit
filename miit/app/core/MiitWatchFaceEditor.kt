@@ -52,7 +52,9 @@ private enum class ToolCategory(val icon: String, val title: String) {
     SHAPE("○", "Shape"),
     MEDIA("▣", "Media"),
     LAYERS("≡", "Layers"),
-    AOD("☾", "AOD")
+    STYLE("✦", "Style"),
+    AOD("☾", "AOD"),
+    EXPORT("⇩", "Export")
 }
 
 private enum class EditorElementType {
