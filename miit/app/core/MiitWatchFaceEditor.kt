@@ -194,6 +194,8 @@ fun MiitWatchFaceEditor(
     }
 
     Column(Modifier.fillMaxSize().background(Color(0xFF101114))) {
+        // Leave a clean safe area for the phone status bar/camera cut-out.
+        Spacer(Modifier.height(14.dp))
         // Minimal editor header: icon-first, no Material button/card treatment.
         Row(
             Modifier.fillMaxWidth().height(52.dp).background(Color(0xFF18191D)).padding(horizontal = 8.dp),
