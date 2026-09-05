@@ -112,6 +112,8 @@ fun MiitWatchFaceEditor(
     var previewMode by remember { mutableStateOf(false) }
     var aodEnabled by remember { mutableStateOf(false) }
     var editingTextId by remember { mutableIntStateOf(0) }
+    var referenceUri by remember(display?.stableId) { mutableStateOf<String?>(display?.previewPath) }
+    var imageTarget by remember { mutableIntStateOf(0) }
     var selectedImageId by remember { mutableIntStateOf(0) }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -122,6 +124,21 @@ fun MiitWatchFaceEditor(
             }
         }
         selectedImageId = 0
+    }
+
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            if (imageTarget == -1) {
+                referenceUri = uri.toString()
+            } else if (imageTarget != 0) {
+                val index = elements.indexOfFirst { it.id == imageTarget }
+                if (index >= 0) elements[index] = elements[index].copy(preview = uri.toString())
+            }
+        }
+        imageTarget = 0
     }
 
     fun addElement(type: EditorElementType) {
@@ -136,6 +153,10 @@ fun MiitWatchFaceEditor(
         )
         selectedId = id
         if (type == EditorElementType.TEXT) editingTextId = id
+        if (type == EditorElementType.IMAGE) {
+            imageTarget = id
+            imagePicker.launch(arrayOf("image/*"))
+        }
         if (type == EditorElementType.IMAGE) {
             selectedImageId = id
             imagePicker.launch(arrayOf("image/*"))
@@ -252,7 +273,7 @@ fun MiitWatchFaceEditor(
                 profile = profile,
                 display = display,
                 device = device,
-                metadataOnly = display != null,
+                metadataOnly = false,
                 onSelect = { selectedId = it },
                 onMove = { id, dx, dy ->
                     val index = elements.indexOfFirst { it.id == id }
@@ -327,6 +348,7 @@ private fun SubToolBar(
         )
         ToolCategory.TEXT -> listOf(
             SubAction("T", "Text") { onAdd(EditorElementType.TEXT) },
+            SubAction("✎", "Edit") { onEditText() },
             SubAction("D", "Date") { onAdd(EditorElementType.DATE) },
             SubAction("W", "Weekday") { onAdd(EditorElementType.WEEKDAY) }
         )
@@ -344,7 +366,7 @@ private fun SubToolBar(
             SubAction("／", "Line") { onAdd(EditorElementType.LINE) },
             SubAction("◔", "Arc") { onAdd(EditorElementType.ARC) }
         )
-        ToolCategory.MEDIA -> listOf(SubAction("▧", "Image") { onAdd(EditorElementType.IMAGE) })
+        ToolCategory.MEDIA -> listOf(SubAction("▧", "Image") { onAdd(EditorElementType.IMAGE) }, SubAction("◎", "Reference") { imageTarget = -1; imagePicker.launch(arrayOf("image/*")) })
         ToolCategory.LAYERS -> listOf(
             SubAction("↑", "Front") { onLayerAction("front") },
             SubAction("↓", "Back") { onLayerAction("back") },
@@ -439,7 +461,7 @@ private fun WatchCanvasV2(
                     .height((190f * profile.height / profile.width).dp)
                     .background(Color.Black, RoundedCornerShape(34.dp))
             ) {
-                display?.previewPath?.let { preview ->
+                referenceUri?.let { preview ->
                     val bitmap = remember(preview) { runCatching { BitmapFactory.decodeFile(preview)?.asImageBitmap() }.getOrNull() }
                     if (bitmap != null) Image(bitmap, "Watch-face preview", Modifier.fillMaxSize())
                 }
