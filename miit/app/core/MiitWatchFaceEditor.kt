@@ -417,7 +417,7 @@ private fun SubToolBar(
         )
         ToolCategory.MEDIA -> listOf(
             SubAction("▧", "Photo") { onPickImage() },
-            SubAction("◎", "Reference") { onReference }
+            SubAction("◎", "Reference") { onReference() }
         )
         ToolCategory.LAYERS -> listOf(
             SubAction("↑", "Front") { onLayerAction("front") },
