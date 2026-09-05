@@ -27,10 +27,25 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.Executors
 
 /** Discovery and connection state machine for Xiaomi Smart Band 8+/9/10. */
-class BandScanner(context: Context) {
+class BandScanner(context: Context, initialActivity: Activity? = null) {
     companion object {
         private const val COMPANION_REQUEST_CODE = 7401
         private var activeScanner: BandScanner? = null
+        @Volatile private var singleton: BandScanner? = null
+
+        @Synchronized
+        fun getInstance(context: Context): BandScanner {
+            val existing = singleton
+            return if (existing != null) {
+                existing.updateActivity(context)
+                existing
+            } else {
+                BandScanner(context.applicationContext, context as? Activity).also {
+                    singleton = it
+                    activeScanner = it
+                }
+            }
+        }
 
         fun dispatchCompanionResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
             if (requestCode != COMPANION_REQUEST_CODE) return false
@@ -40,7 +55,7 @@ class BandScanner(context: Context) {
     }
 
     private val appContext = context.applicationContext
-    private val activity = context as? Activity
+    @Volatile private var activity: Activity? = initialActivity
     private val bluetoothManager = appContext.getSystemService(BluetoothManager::class.java)
     private val adapter: BluetoothAdapter? get() = bluetoothManager?.adapter
     private val scanner: BluetoothLeScanner? get() = adapter?.bluetoothLeScanner
@@ -81,6 +96,10 @@ class BandScanner(context: Context) {
                 }
             }
         }
+    }
+
+    private fun updateActivity(context: Context) {
+        activity = context as? Activity
     }
 
     init {
@@ -176,6 +195,29 @@ class BandScanner(context: Context) {
         scanCallback?.let { runCatching { scanner?.stopScan(it) } }
         scanCallback = null
         if (_state.value == BandConnectionState.Scanning) _state.value = BandConnectionState.Idle
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun restoreLastConnection() {
+        mainHandler.postDelayed({
+            val prefs = appContext.getSharedPreferences("miit_pairing", Context.MODE_PRIVATE)
+            val address = prefs.getString("last_connected_address", null) ?: return@postDelayed
+            val keyText = prefs.getString("auth_key", null) ?: return@postDelayed
+            val key = AuthKeyParser.parse(keyText) ?: return@postDelayed
+            val remote = runCatching { adapter?.getRemoteDevice(address) }.getOrNull() ?: return@postDelayed
+            if (remote.bondState != BluetoothDevice.BOND_BONDED) return@postDelayed
+            if (activeAddress != null || spp != null) return@postDelayed
+            val item = BandDevice(
+                name = remote.name ?: "Xiaomi Band",
+                address = remote.address,
+                rssi = 0
+            )
+            _devices.value = listOf(item)
+            activeAuthKey = key.copyOf()
+            automaticMode = false
+            MiitTestLog.add("Restoring previous Xiaomi Band connection")
+            connect(item, key)
+        }, 350)
     }
 
     @SuppressLint("MissingPermission")
@@ -284,6 +326,11 @@ class BandScanner(context: Context) {
                     BandConnectionState.Authenticated -> {
                         automaticMode = false
                         updateConnected(device.address, true, true)
+                        appContext.getSharedPreferences("miit_pairing", Context.MODE_PRIVATE)
+                            .edit()
+                            .putString("last_connected_address", device.address)
+                            .putString("last_connected_name", device.name)
+                            .apply()
                     }
                     BandConnectionState.Error, BandConnectionState.Disconnected -> {
                         updateConnected(device.address, false, false)
@@ -349,9 +396,20 @@ class BandScanner(context: Context) {
     }
 
     fun close() {
-        stopScan(); runCatching { appContext.unregisterReceiver(bondReceiver) }; spp?.close(); spp = null
+        // Activity disposal must not terminate the process-scoped Band connection.
+        stopScan()
+    }
+
+    fun shutdownForProcess() {
+        stopScan()
+        runCatching { appContext.unregisterReceiver(bondReceiver) }
+        spp?.close()
+        spp = null
         worker.shutdownNow()
+        activeAddress = null
+        activeAuthKey = null
+        pendingBondDevice = null
         if (activeScanner === this) activeScanner = null
-        activeAddress = null; activeAuthKey = null; pendingBondDevice = null
+        if (singleton === this) singleton = null
     }
 }
