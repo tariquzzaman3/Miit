@@ -127,6 +127,7 @@ fun MiitWatchFaceEditor(
     var referencePath by remember(display?.stableId) { mutableStateOf(display?.previewPath) }
     var layersOpen by remember { mutableStateOf(false) }
     var referenceOpacity by remember { mutableStateOf(0.65f) }
+    var propertiesOpen by remember { mutableStateOf(false) }
     var undoStack by remember { mutableStateOf<List<List<EditorElement>>>(emptyList()) }
     var redoStack by remember { mutableStateOf<List<List<EditorElement>>>(emptyList()) }
 
