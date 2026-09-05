@@ -8,7 +8,8 @@ data class BandDisplay(
     val inMoreSection: Boolean = false,
     val active: Boolean = false,
     val canDelete: Boolean = false,
-    val source: Source = Source.DISPLAY_ITEM
+    val source: Source = Source.DISPLAY_ITEM,
+    val previewPath: String? = null
 ) {
     enum class Source {
         DISPLAY_ITEM,
