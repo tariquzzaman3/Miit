@@ -890,7 +890,7 @@ private fun FullPreview(
             Text(if (aod) "AOD Preview" else "Watch Face Preview", color = Color.White, fontSize = 15.sp)
         }
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            WatchCanvasV2(elements, 0, profile, null, null, null, false, {}, { _, _, _ -> })
+            WatchCanvasV2(elements, 0, profile, null, null, null, 1f, false, {}, { _, _, _ -> })
         }
     }
 }
