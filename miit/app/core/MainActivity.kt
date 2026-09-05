@@ -69,6 +69,7 @@ import com.miit.app.band.BandDevice
 import com.miit.app.band.BandDisplay
 import com.miit.app.band.BandScanner
 import com.miit.app.band.MiitTestLog
+import com.miit.app.band.MiitConnectionService
 import com.miit.app.band.MiFitnessAuthKeyExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
