@@ -272,7 +272,11 @@ private fun SubToolBar(
     onAodChange: (Boolean) -> Unit,
     onAdd: (EditorElementType) -> Unit,
     onLayerAction: (String) -> Unit,
-    modifier: Modifier
+    modifier: Modifier,
+    onModifySelected: ((EditorElement) -> EditorElement) -> Unit = {},
+    onEditText: () -> Unit = {},
+    onExport: () -> Unit = {},
+    onBand: () -> Unit = {}
 ) {
     val items = when (category) {
         ToolCategory.ADD -> listOf(
