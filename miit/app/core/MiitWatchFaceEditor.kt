@@ -360,16 +360,15 @@ fun MiitWatchFaceEditor(
                     }
                 }
             )
-        }
-
-        if (layersOpen) {
-            LayerPanel(
-                elements = elements,
-                selectedId = selectedId,
-                onSelect = { selectedId = it },
-                onClose = { layersOpen = false },
-                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(175.dp)
-            )
+            if (layersOpen) {
+                LayerPanel(
+                    elements = elements,
+                    selectedId = selectedId,
+                    onSelect = { selectedId = it },
+                    onClose = { layersOpen = false },
+                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(175.dp)
+                )
+            }
         }
 
         // Lightweight selected-element strip; still icon-first.
