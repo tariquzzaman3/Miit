@@ -2,11 +2,6 @@ package com.miit.app
 
 import android.graphics.BitmapFactory
 import android.widget.Toast
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -47,10 +42,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import com.miit.app.band.BandDevice
 import com.miit.app.band.BandDisplay
 
@@ -112,23 +103,6 @@ fun MiitWatchFaceEditor(
     var previewMode by remember { mutableStateOf(false) }
     var aodEnabled by remember { mutableStateOf(false) }
     var editingTextId by remember { mutableIntStateOf(0) }
-    var referenceUri by remember(display?.stableId) { mutableStateOf<String?>(display?.previewPath) }
-    var imageTarget by remember { mutableIntStateOf(0) }
-
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            if (imageTarget == -1) {
-                referenceUri = uri.toString()
-            } else if (imageTarget != 0) {
-                val index = elements.indexOfFirst { it.id == imageTarget }
-                if (index >= 0) elements[index] = elements[index].copy(preview = uri.toString())
-            }
-        }
-        imageTarget = 0
-    }
 
     fun addElement(type: EditorElementType) {
         val id = nextId++
@@ -141,15 +115,6 @@ fun MiitWatchFaceEditor(
             size = if (type == EditorElementType.TIME) 36f else 18f
         )
         selectedId = id
-        if (type == EditorElementType.TEXT) editingTextId = id
-        if (type == EditorElementType.IMAGE) {
-            imageTarget = id
-            imagePicker.launch(arrayOf("image/*"))
-        }
-        if (type == EditorElementType.IMAGE) {
-            selectedImageId = id
-            imagePicker.launch(arrayOf("image/*"))
-        }
     }
 
     if (editingTextId != 0) {
@@ -159,8 +124,7 @@ fun MiitWatchFaceEditor(
                 initial = item.preview,
                 onDismiss = { editingTextId = 0 },
                 onApply = { value ->
-                    val index = elements.indexOfFirst { it.id == editingTextId }
-                    if (index >= 0) elements[index] = elements[index].copy(preview = value)
+                    elements[elements.indexOfFirst { it.id == editingTextId }] = elements[elements.indexOfFirst { it.id == editingTextId }].copy(preview = value)
                     editingTextId = 0
                 }
             )
@@ -262,7 +226,7 @@ fun MiitWatchFaceEditor(
                 profile = profile,
                 display = display,
                 device = device,
-                metadataOnly = false,
+                metadataOnly = display != null,
                 onSelect = { selectedId = it },
                 onMove = { id, dx, dy ->
                     val index = elements.indexOfFirst { it.id == id }
@@ -337,7 +301,6 @@ private fun SubToolBar(
         )
         ToolCategory.TEXT -> listOf(
             SubAction("T", "Text") { onAdd(EditorElementType.TEXT) },
-            SubAction("✎", "Edit") { onEditText() },
             SubAction("D", "Date") { onAdd(EditorElementType.DATE) },
             SubAction("W", "Weekday") { onAdd(EditorElementType.WEEKDAY) }
         )
@@ -355,7 +318,7 @@ private fun SubToolBar(
             SubAction("／", "Line") { onAdd(EditorElementType.LINE) },
             SubAction("◔", "Arc") { onAdd(EditorElementType.ARC) }
         )
-        ToolCategory.MEDIA -> listOf(SubAction("▧", "Image") { onAdd(EditorElementType.IMAGE) }, SubAction("◎", "Reference") { imageTarget = -1; imagePicker.launch(arrayOf("image/*")) })
+        ToolCategory.MEDIA -> listOf(SubAction("▧", "Image") { onAdd(EditorElementType.IMAGE) })
         ToolCategory.LAYERS -> listOf(
             SubAction("↑", "Front") { onLayerAction("front") },
             SubAction("↓", "Back") { onLayerAction("back") },
@@ -450,50 +413,25 @@ private fun WatchCanvasV2(
                     .height((190f * profile.height / profile.width).dp)
                     .background(Color.Black, RoundedCornerShape(34.dp))
             ) {
-                referenceUri?.let { preview ->
+                display?.previewPath?.let { preview ->
                     val bitmap = remember(preview) { runCatching { BitmapFactory.decodeFile(preview)?.asImageBitmap() }.getOrNull() }
                     if (bitmap != null) Image(bitmap, "Watch-face preview", Modifier.fillMaxSize())
                 }
                 elements.filter { it.visible }.forEach { element ->
                     val x = (element.x / 100f * 166f).dp
                     val y = (element.y / 100f * ((190f * profile.height / profile.width) - 10f)).dp
-                    if (element.type == EditorElementType.IMAGE && element.preview.isNotBlank()) {
-                        EditorImageElement(
-                            source = element.preview,
-                            x = x,
-                            y = y,
-                            selected = element.id == selectedId,
-                            onSelect = { onSelect(element.id) },
-                            onMove = { dx, dy -> onMove(element.id, dx, dy) }
-                        )
-                    } else if (element.type == EditorElementType.CIRCLE ||
-                        element.type == EditorElementType.RECTANGLE ||
-                        element.type == EditorElementType.LINE ||
-                        element.type == EditorElementType.ARC
-                    ) {
-                        EditorShapeElement(
-                            element = element,
-                            x = x,
-                            y = y,
-                            selected = element.id == selectedId,
-                            onSelect = { onSelect(element.id) },
-                            onMove = { dx, dy -> onMove(element.id, dx, dy) }
-                        )
-                    } else {
-                        Text(
-                            renderElementValue(element, device),
-                            color = element.color,
-                            fontSize = element.size.sp,
-                            fontWeight = if (element.bold || element.type == EditorElementType.TIME) FontWeight.Bold else FontWeight.Normal,
-                            modifier = Modifier.padding(start = x, top = y).pointerInput(element.id) {
-                                detectDragGestures { change, amount ->
-                                    change.consume()
-                                    onSelect(element.id)
-                                    onMove(element.id, amount.x / 1.66f, amount.y / 4.08f)
-                                }
+                    Text(
+                        renderElementValue(element, device),
+                        color = element.color,
+                        fontSize = element.size.sp,
+                        modifier = Modifier.padding(start = x, top = y).pointerInput(element.id) {
+                            detectDragGestures { change, amount ->
+                                change.consume()
+                                onSelect(element.id)
+                                onMove(element.id, amount.x / 1.66f, amount.y / 4.08f)
                             }
-                        )
-                    }
+                        }
+                    )
                 }
                 if (metadataOnly) {
                     Text(
@@ -510,89 +448,6 @@ private fun WatchCanvasV2(
                 Text("Metadata only — no demo values injected", color = Color(0xFF9AA0AA), fontSize = 10.sp)
             }
         }
-    }
-}
-
-@Composable
-private fun EditorImageElement(
-    source: String,
-    x: androidx.compose.ui.unit.Dp,
-    y: androidx.compose.ui.unit.Dp,
-    selected: Boolean,
-    onSelect: () -> Unit,
-    onMove: (Float, Float) -> Unit
-) {
-    val context = LocalContext.current
-    var bitmap by remember(source) { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(source) {
-        bitmap = withContext(Dispatchers.IO) {
-            runCatching {
-                if (source.startsWith("content://")) {
-                    context.contentResolver.openInputStream(Uri.parse(source))?.use {
-                        BitmapFactory.decodeStream(it)?.asImageBitmap()
-                    }
-                } else {
-                    BitmapFactory.decodeFile(source)?.asImageBitmap()
-                }
-            }.getOrNull()
-        }
-    }
-    Box(
-        Modifier
-            .padding(start = x, top = y)
-            .size(82.dp, 62.dp)
-            .background(if (selected) Color(0x553F78FF) else Color.Transparent, RoundedCornerShape(4.dp))
-            .pointerInput(source) {
-                detectDragGestures(
-                    onDragStart = { onSelect() },
-                    onDrag = { change, amount ->
-                        change.consume()
-                        onMove(amount.x / 1.66f, amount.y / 4.08f)
-                    }
-                )
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        if (bitmap != null) {
-            Image(bitmap!!, "Watch-face image", Modifier.fillMaxSize())
-        } else {
-            Text("Image", color = Color.Gray, fontSize = 9.sp)
-        }
-    }
-}
-
-@Composable
-private fun EditorShapeElement(
-    element: EditorElement,
-    x: androidx.compose.ui.unit.Dp,
-    y: androidx.compose.ui.unit.Dp,
-    selected: Boolean,
-    onSelect: () -> Unit,
-    onMove: (Float, Float) -> Unit
-) {
-    Canvas(
-        Modifier
-            .padding(start = x, top = y)
-            .size(70.dp, 50.dp)
-            .pointerInput(element.id) {
-                detectDragGestures(
-                    onDragStart = { onSelect() },
-                    onDrag = { change, amount ->
-                        change.consume()
-                        onMove(amount.x / 1.66f, amount.y / 4.08f)
-                    }
-                )
-            }
-    ) {
-        val stroke = 2.dp.toPx()
-        when (element.type) {
-            EditorElementType.CIRCLE -> drawCircle(element.color, size.minDimension / 2f, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
-            EditorElementType.RECTANGLE -> drawRect(element.color, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
-            EditorElementType.LINE -> drawLine(element.color, Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), strokeWidth = stroke)
-            EditorElementType.ARC -> drawArc(element.color, -90f, 260f, false, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
-            else -> Unit
-        }
-        if (selected) drawRect(Color(0x663F78FF), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
     }
 }
 
