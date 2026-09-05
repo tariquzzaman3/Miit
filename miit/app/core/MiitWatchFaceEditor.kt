@@ -368,7 +368,8 @@ private fun SubToolBar(
     onModifySelected: ((EditorElement) -> EditorElement) -> Unit = {},
     onEditText: () -> Unit = {},
     onExport: () -> Unit = {},
-    onBand: () -> Unit = {}
+    onBand: () -> Unit = {},
+    onAi: () -> Unit = {}
 ) {
     val items = when (category) {
         ToolCategory.ADD -> listOf(
@@ -430,7 +431,16 @@ private fun SubToolBar(
             SubAction("◎", "Centre") { onAi() },
             SubAction("✓", "Clean") { onAi() }
         )
-        ToolCategory.EXPORT -> listOf(SubAction("⇩", "Save") { onExport() }, SubAction("✓", "Check") { onExport() }, SubAction("⌂", "Band") { onBand() })
+        ToolCategory.AI -> listOf(
+            SubAction("✧", "Arrange") { onAi() },
+            SubAction("◎", "Center") { onAi() },
+            SubAction("✓", "Clean") { onAi() }
+        )
+        ToolCategory.EXPORT -> listOf(
+            SubAction("⇩", "Save") { onExport() },
+            SubAction("✓", "Check") { onExport() },
+            SubAction("⌂", "Band") { onBand() }
+        )
     }
 
     Row(
