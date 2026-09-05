@@ -858,6 +858,7 @@ private fun SelectedElementBar(
     onDelete: () -> Unit,
     onExport: () -> Unit,
     onBand: () -> Unit,
+    onProperties: () -> Unit,
     onAi: () -> Unit = {}
 ) {
     Row(
@@ -866,7 +867,7 @@ private fun SelectedElementBar(
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Text(selected?.type?.name ?: "Nothing selected", color = Color.White, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 4.dp))
-        listOf("−" to { onChangeSize(-2f) }, "+" to { onChangeSize(2f) }, "Export" to onExport, "Band" to onBand, "×" to onDelete).forEach { (label, action) ->
+        listOf("⚙" to onProperties, "−" to { onChangeSize(-2f) }, "+" to { onChangeSize(2f) }, "Export" to onExport, "Band" to onBand, "×" to onDelete).forEach { (label, action) ->
             Box(
                 Modifier.size(44.dp).background(Color(0xFF27282D), RoundedCornerShape(10.dp)).clickable(onClick = action),
                 contentAlignment = Alignment.Center
