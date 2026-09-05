@@ -548,36 +548,34 @@ private fun TextEditDialog(
 }
 
 @Composable
+@Composable
 private fun MiCreateSourceDialog(
     onDismiss: () -> Unit,
     onSelect: (String) -> Unit
 ) {
-    val sources = listOf(
-        "Hour", "Minute", "Second", "Day", "Week", "Month", "Year", "AM/PM",
-        "Battery charging status", "Battery percent", "Heart rate", "Interval heart rate",
-        "Current step count", "Step target", "Active Calorie", "Active calorie target value",
-        "Stand Up value", "Stand Up target", "Sleep score", "Remaining energy",
-        "Goal achieve of step", "Target calorie achieve", "Stand up target achieve",
-        "Atmospheric pressure", "Elevation value", "Psychological stress",
-        "Current temperature", "Current maximum temperature", "Current minimum temperature",
-        "Air Quality Index"
-    )
+    val sources = MiCreateCatalog.band9Sources
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Data source") },
+        title = { Text("Mi-Create data source") },
         text = {
             LazyColumn {
-                items(sources) { source ->
+                items(sources.filter { it.idFprj != "0" }) { source ->
                     TextButton(
-                        onClick = { onSelect(source) },
+                        onClick = { onSelect(source.name) },
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text(source) }
+                    ) {
+                        Column(Modifier.fillMaxWidth()) {
+                            Text(source.name)
+                            Text(source.idFprj, color = Color.Gray, fontSize = 8.sp)
+                        }
+                    }
                 }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
     )
 }
+
 
 @Composable
 private fun ToolGlyph(icon: String, description: String, onClick: () -> Unit) {
