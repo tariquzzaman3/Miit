@@ -554,19 +554,38 @@ private fun WatchCanvasV2(
                 elements.filter { it.visible }.forEach { element ->
                     val x = (element.x / 100f * 166f).dp
                     val y = (element.y / 100f * ((190f * profile.height / profile.width) - 10f)).dp
-                    Text(
-                        renderElementValue(element, device),
-                        color = element.color,
-                        fontSize = element.size.sp,
-                        fontWeight = if (element.bold || element.type == EditorElementType.TIME) FontWeight.Bold else FontWeight.Normal,
-                        modifier = Modifier.padding(start = x, top = y).pointerInput(element.id) {
-                            detectDragGestures { change, amount ->
-                                change.consume()
-                                onSelect(element.id)
-                                onMove(element.id, amount.x / 1.66f, amount.y / 4.08f)
+                    when (element.type) {
+                        EditorElementType.IMAGE -> EditorImageLayer(element, x, y, element.id == selectedId, onSelect, onMove)
+                        EditorElementType.CIRCLE, EditorElementType.RECTANGLE, EditorElementType.LINE, EditorElementType.ARC ->
+                            EditorShapeLayer(element, x, y, element.id == selectedId, onSelect, onMove)
+                        EditorElementType.ANALOG_CLOCK -> EditorAnalogLayer(element, x, y, element.id == selectedId, onSelect)
+                        EditorElementType.ARC_PROGRESS, EditorElementType.LINE_PROGRESS -> EditorProgressLayer(element, x, y, device)
+                        EditorElementType.CONTAINER -> Box(
+                            Modifier.padding(start = x, top = y)
+                                .size(80.dp, 45.dp)
+                                .background(Color.Transparent, RoundedCornerShape(5.dp))
+                                .pointerInput(element.id) {
+                                    detectDragGestures { change, amount ->
+                                        change.consume()
+                                        onSelect(element.id)
+                                        onMove(element.id, amount.x / 1.66f, amount.y / 4.08f)
+                                    }
+                                }
+                        )
+                        else -> Text(
+                            renderElementValue(element, device),
+                            color = element.color,
+                            fontSize = element.size.sp,
+                            fontWeight = if (element.bold || element.type == EditorElementType.TIME) FontWeight.Bold else FontWeight.Normal,
+                            modifier = Modifier.padding(start = x, top = y).pointerInput(element.id) {
+                                detectDragGestures { change, amount ->
+                                    change.consume()
+                                    onSelect(element.id)
+                                    onMove(element.id, amount.x / 1.66f, amount.y / 4.08f)
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
                 if (metadataOnly && display?.previewPath == null) {
                     Text(
@@ -582,6 +601,129 @@ private fun WatchCanvasV2(
             if (metadataOnly) {
                 Text("Metadata only — no demo values injected", color = Color(0xFF9AA0AA), fontSize = 10.sp)
             }
+        }
+    }
+}
+
+@Composable
+private fun EditorImageLayer(
+    element: EditorElement,
+    x: Dp,
+    y: Dp,
+    selected: Boolean,
+    onSelect: (Int) -> Unit,
+    onMove: (Int, Float, Float) -> Unit
+) {
+    val context = LocalContext.current
+    var bitmap by remember(element.preview) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(element.preview) {
+        bitmap = withContext(Dispatchers.IO) {
+            runCatching {
+                if (element.preview.startsWith("content://")) {
+                    context.contentResolver.openInputStream(Uri.parse(element.preview))?.use {
+                        BitmapFactory.decodeStream(it)?.asImageBitmap()
+                    }
+                } else null
+            }.getOrNull()
+        }
+    }
+    Box(
+        Modifier.padding(start = x, top = y)
+            .size(86.dp, 64.dp)
+            .background(if (selected) Color(0x443F78FF) else Color.Transparent, RoundedCornerShape(4.dp))
+            .pointerInput(element.id) {
+                detectDragGestures { change, amount ->
+                    change.consume()
+                    onSelect(element.id)
+                    onMove(element.id, amount.x / 1.66f, amount.y / 4.08f)
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        bitmap?.let { Image(it, "Inserted image", Modifier.fillMaxSize()) }
+            ?: Text("Photo", color = Color.Gray, fontSize = 9.sp)
+    }
+}
+
+@Composable
+private fun EditorShapeLayer(
+    element: EditorElement,
+    x: Dp,
+    y: Dp,
+    selected: Boolean,
+    onSelect: (Int) -> Unit,
+    onMove: (Int, Float, Float) -> Unit
+) {
+    Canvas(
+        Modifier.padding(start = x, top = y)
+            .size(76.dp, 55.dp)
+            .pointerInput(element.id) {
+                detectDragGestures { change, amount ->
+                    change.consume()
+                    onSelect(element.id)
+                    onMove(element.id, amount.x / 1.66f, amount.y / 4.08f)
+                }
+            }
+    ) {
+        val stroke = Stroke(2.dp.toPx())
+        when (element.type) {
+            EditorElementType.CIRCLE -> drawCircle(element.color, style = stroke)
+            EditorElementType.RECTANGLE -> drawRect(element.color, style = stroke)
+            EditorElementType.LINE -> drawLine(element.color, Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+            EditorElementType.ARC -> drawArc(element.color, -90f, 270f, false, style = stroke)
+            else -> Unit
+        }
+        if (selected) drawRect(Color(0x663F78FF), style = Stroke(1.dp.toPx()))
+    }
+}
+
+@Composable
+private fun EditorAnalogLayer(
+    element: EditorElement,
+    x: Dp,
+    y: Dp,
+    selected: Boolean,
+    onSelect: (Int) -> Unit
+) {
+    Canvas(Modifier.padding(start = x, top = y).size(78.dp).clickable { onSelect(element.id) }) {
+        val now = java.util.Calendar.getInstance()
+        val h = now.get(java.util.Calendar.HOUR)
+        val m = now.get(java.util.Calendar.MINUTE)
+        val s = now.get(java.util.Calendar.SECOND)
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        val radius = size.minDimension / 2f - 2.dp.toPx()
+        drawCircle(element.color, radius, style = Stroke(2.dp.toPx()))
+        fun hand(angle: Float, length: Float, width: Float) {
+            val rad = Math.toRadians(angle.toDouble())
+            drawLine(element.color, Offset(cx, cy), Offset(cx + kotlin.math.cos(rad).toFloat() * length, cy + kotlin.math.sin(rad).toFloat() * length), strokeWidth = width)
+        }
+        hand(h / 12f * 360f - 90f, radius * .48f, 4f)
+        hand(m / 60f * 360f - 90f, radius * .72f, 3f)
+        hand(s / 60f * 360f - 90f, radius * .84f, 1.5f)
+        if (selected) drawCircle(Color(0xFF3F78FF), radius + 2.dp.toPx(), style = Stroke(1.dp.toPx()))
+    }
+}
+
+@Composable
+private fun EditorProgressLayer(
+    element: EditorElement,
+    x: Dp,
+    y: Dp,
+    device: BandDevice?
+) {
+    val value = when (element.preview) {
+        "Battery percent" -> (device?.batteryPercentage ?: 0).coerceIn(0, 100) / 100f
+        else -> 0f
+    }
+    Canvas(Modifier.padding(start = x, top = y).size(85.dp, 28.dp)) {
+        if (element.type == EditorElementType.LINE_PROGRESS) {
+            drawLine(Color.DarkGray, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 4.dp.toPx())
+            drawLine(element.color, Offset(0f, size.height / 2), Offset(size.width * value, size.height / 2), 4.dp.toPx())
+        } else {
+            val radius = size.minDimension / 2f - 3.dp.toPx()
+            drawArc(Color.DarkGray, -90f, 360f, false, style = Stroke(4.dp.toPx()))
+            drawArc(element.color, -90f, value * 360f, false, style = Stroke(4.dp.toPx()))
         }
     }
 }
