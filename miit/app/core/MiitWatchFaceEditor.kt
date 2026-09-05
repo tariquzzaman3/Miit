@@ -99,6 +99,7 @@ fun MiitWatchFaceEditor(
     var selectedTool by remember { mutableStateOf(ToolCategory.ADD) }
     var previewMode by remember { mutableStateOf(false) }
     var aodEnabled by remember { mutableStateOf(false) }
+    var editingTextId by remember { mutableIntStateOf(0) }
 
     fun addElement(type: EditorElementType) {
         val id = nextId++
@@ -324,6 +325,28 @@ private fun SubToolBar(
 }
 
 private data class SubAction(val icon: String, val title: String, val onClick: () -> Unit)
+
+@Composable
+private fun TextEditDialog(
+    initial: String,
+    onDismiss: () -> Unit,
+    onApply: (String) -> Unit
+) {
+    var text by remember(initial) { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit text") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = { Button(onClick = { onApply(text) }) { Text("Apply") } },
+        dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
 
 @Composable
 private fun ToolGlyph(icon: String, description: String, onClick: () -> Unit) {
