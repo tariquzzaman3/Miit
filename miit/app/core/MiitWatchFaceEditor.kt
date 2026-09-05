@@ -73,7 +73,8 @@ private data class EditorElement(
     val visible: Boolean = true,
     val locked: Boolean = false,
     val bold: Boolean = false,
-    val alignment: String = "Center"
+    val alignment: String = "Center",
+    val format: String = ""
 )
 
 @Composable
@@ -120,10 +121,10 @@ fun MiitWatchFaceEditor(
         val item = elements.firstOrNull { it.id == editingTextId }
         if (item != null) {
             TextEditDialog(
-                initial = item.value,
+                initial = item.preview,
                 onDismiss = { editingTextId = 0 },
                 onApply = { value ->
-                    applyElements(elements.map { if (it.id == editingTextId) it.copy(value = value) else it })
+                    elements[elements.indexOfFirst { it.id == editingTextId }] = elements[elements.indexOfFirst { it.id == editingTextId }].copy(preview = value)
                     editingTextId = 0
                 }
             )
@@ -418,7 +419,7 @@ private fun WatchCanvasV2(
                 }
                 elements.filter { it.visible }.forEach { element ->
                     val x = (element.x / 100f * 166f).dp
-                    val y = (element.y / 100f * 408f).dp
+                    val y = (element.y / 100f * ((190f * profile.height / profile.width) - 10f)).dp
                     Text(
                         renderElementValue(element, device),
                         color = element.color,
@@ -531,4 +532,29 @@ private fun livePreview(type: EditorElementType, device: BandDevice?): String = 
     EditorElementType.RECTANGLE -> "□"
     EditorElementType.LINE -> "—"
     EditorElementType.ARC -> "◔"
+}
+
+private fun renderElementValue(element: EditorElement, device: BandDevice?): String = when (element.type) {
+    EditorElementType.TIME -> {
+        val format = element.format.ifBlank { "HH:mm" }
+        java.text.SimpleDateFormat(format, java.util.Locale.getDefault()).format(java.util.Date())
+    }
+    EditorElementType.DATE -> java.text.SimpleDateFormat(
+        when (element.format) {
+            "DD/MM" -> "dd/MM"
+            "MM/DD" -> "MM/dd"
+            "DD MMM" -> "dd MMM"
+            "DD MMM YYYY" -> "dd MMM yyyy"
+            else -> "dd"
+        },
+        java.util.Locale.getDefault()
+    ).format(java.util.Date())
+    EditorElementType.WEEKDAY -> java.text.SimpleDateFormat(
+        if (element.format == "Monday") "EEEE" else "EEE",
+        java.util.Locale.getDefault()
+    ).format(java.util.Date())
+    EditorElementType.HEART_RATE -> device?.heartRate?.let { "♥ $it" } ?: element.preview.ifBlank { "♥" }
+    EditorElementType.BATTERY -> device?.batteryPercentage?.let { "$it%" } ?: element.preview.ifBlank { "▣" }
+    EditorElementType.CUSTOM_TEXT -> element.preview.ifBlank { "Text" }
+    else -> element.preview.ifBlank { livePreview(element.type, device) }
 }
