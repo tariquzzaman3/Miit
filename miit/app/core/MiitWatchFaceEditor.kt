@@ -1,6 +1,9 @@
 package com.miit.app
 
 import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -27,6 +30,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -42,6 +46,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.miit.app.band.BandDevice
 import com.miit.app.band.BandDisplay
 
@@ -103,6 +109,9 @@ fun MiitWatchFaceEditor(
     var previewMode by remember { mutableStateOf(false) }
     var aodEnabled by remember { mutableStateOf(false) }
     var editingTextId by remember { mutableIntStateOf(0) }
+    var sourcePicker by remember { mutableStateOf(false) }
+    var imageTarget by remember { mutableIntStateOf(0) }
+    var referencePath by remember(display?.stableId) { mutableStateOf(display?.previewPath) }
 
     fun addElement(type: EditorElementType) {
         val id = nextId++
