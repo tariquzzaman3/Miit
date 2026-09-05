@@ -313,6 +313,8 @@ fun MiitWatchFaceEditor(
                 }
             },
             onLayerAction = { action ->
+                layersOpen = true
+                snapshotBeforeChange()
                 val selected = elements.indexOfFirst { it.id == selectedId }
                 if (selected < 0) return@SubToolBar
                 when (action) {
@@ -344,6 +346,7 @@ fun MiitWatchFaceEditor(
                 display = display,
                 device = device,
                 referencePath = referencePath,
+                referenceOpacity = referenceOpacity,
                 metadataOnly = display != null,
                 onSelect = { selectedId = it },
                 onMove = { id, dx, dy ->
@@ -356,6 +359,16 @@ fun MiitWatchFaceEditor(
                         )
                     }
                 }
+            )
+        }
+
+        if (layersOpen) {
+            LayerPanel(
+                elements = elements,
+                selectedId = selectedId,
+                onSelect = { selectedId = it },
+                onClose = { layersOpen = false },
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(175.dp)
             )
         }
 
@@ -585,6 +598,7 @@ private fun WatchCanvasV2(
     display: BandDisplay?,
     device: BandDevice?,
     referencePath: String?,
+    referenceOpacity: Float,
     metadataOnly: Boolean,
     onSelect: (Int) -> Unit,
     onMove: (Int, Float, Float) -> Unit
@@ -598,7 +612,7 @@ private fun WatchCanvasV2(
                     .background(Color.Black, RoundedCornerShape(34.dp))
             ) {
                 referencePath?.let { preview ->
-                    EditorReferenceImage(preview, Modifier.fillMaxSize().alpha(0.65f))
+                    EditorReferenceImage(preview, Modifier.fillMaxSize().alpha(referenceOpacity))
                 }
                 elements.filter { it.visible }.forEach { element ->
                     val x = (element.x / 100f * 166f).dp
@@ -795,6 +809,46 @@ private fun EditorReferenceImage(source: String, modifier: Modifier) {
         }
     }
     bitmap?.let { Image(it, "Band display reference", modifier) }
+}
+
+@Composable
+private fun LayerPanel(
+    elements: List<EditorElement>,
+    selectedId: Int,
+    onSelect: (Int) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier
+) {
+    Column(
+        modifier.background(Color(0xFF15161A), RoundedCornerShape(topStart = 18.dp, bottomStart = 18.dp)).padding(8.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Layers", color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            ToolGlyph("×", "Close", onClose)
+        }
+        Spacer(Modifier.height(4.dp))
+        elements.asReversed().forEach { element ->
+            Row(
+                Modifier.fillMaxWidth()
+                    .background(
+                        if (element.id == selectedId) Color(0x334BC9BF) else Color.Transparent,
+                        RoundedCornerShape(8.dp)
+                    )
+                    .clickable { onSelect(element.id) }
+                    .padding(vertical = 7.dp, horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(if (element.visible) "◉" else "○", color = Color.White, modifier = Modifier.width(23.dp))
+                Text(
+                    element.type.name.replace('_', ' '),
+                    color = if (element.id == selectedId) Color(0xFF4BC9BF) else Color.White,
+                    fontSize = 9.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                if (element.locked) Text("⌑", color = Color.Gray, fontSize = 10.sp)
+            }
+        }
+    }
 }
 
 @Composable
