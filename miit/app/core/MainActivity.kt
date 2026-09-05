@@ -238,7 +238,8 @@ private fun MiitApp() {
     }
 
     if (showHelp) AuthKeyInstructionsDialog(onDismiss = { showHelp = false })
-    // Multiple extracted keys are tested automatically.\n}
+    // Multiple extracted keys are tested automatically.
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
