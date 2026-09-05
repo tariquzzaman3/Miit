@@ -356,6 +356,8 @@ private fun WatchCanvasV2(
     elements: List<EditorElement>,
     selectedId: Int,
     profile: DeviceProfile,
+    display: BandDisplay?,
+    device: BandDevice?,
     metadataOnly: Boolean,
     onSelect: (Int) -> Unit,
     onMove: (Int, Float, Float) -> Unit
