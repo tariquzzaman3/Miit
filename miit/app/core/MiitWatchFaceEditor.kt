@@ -32,6 +32,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -42,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -844,7 +846,7 @@ private fun livePreview(type: EditorElementType, device: BandDevice?): String = 
     EditorElementType.WEATHER -> "⌂"
     EditorElementType.TEXT -> "Text"
     EditorElementType.IMAGE -> "Image"
-    EditorElementType.DIGITAL_NUMBER -> dataSourcePlaceholder("Number")
+    EditorElementType.DIGITAL_NUMBER -> "NUMBER"
     EditorElementType.ANALOG_CLOCK -> ""
     EditorElementType.ARC_PROGRESS -> ""
     EditorElementType.LINE_PROGRESS -> ""
