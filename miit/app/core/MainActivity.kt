@@ -86,7 +86,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         MiitTestLog.add("App started")
-        val permissions = if (Build.VERSION.SDK_INT >= 31) {
+        val permissions = if (Build.VERSION.SDK_INT >= 33) {
+            arrayOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.POST_NOTIFICATIONS
+            )
+        } else if (Build.VERSION.SDK_INT >= 31) {
             arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
         } else {
             arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_EXTERNAL_STORAGE)
@@ -180,6 +186,11 @@ private fun MiitApp() {
         if (authenticated != null && (connectionState == BandConnectionState.Authenticated || authenticated.connected)) {
             connectedBand = authenticated
             screen = MiitScreen.BAND
+            runCatching {
+                val intent = Intent(context, MiitConnectionService::class.java)
+                if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent)
+                else context.startService(intent)
+            }
         } else if (connectionState == BandConnectionState.Connecting ||
             connectionState == BandConnectionState.Authenticating ||
             connectionState == BandConnectionState.Authenticated
