@@ -64,6 +64,7 @@ private enum class ToolCategory(val icon: String, val title: String) {
     LAYERS("≡", "Layers"),
     STYLE("✦", "Style"),
     AOD("☾", "AOD"),
+    AI("✧", "AI"),
     EXPORT("⇩", "Export")
 }
 
