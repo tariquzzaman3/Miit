@@ -363,13 +363,16 @@ private fun WatchCanvasV2(
     Box(Modifier.fillMaxSize().background(Color(0xFF0D0E10)), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Box(
-                Modifier.width(190.dp).height(430.dp).background(Color.Black, RoundedCornerShape(34.dp))
+                Modifier
+                    .width(190.dp)
+                    .height((190f * profile.height / profile.width).dp)
+                    .background(Color.Black, RoundedCornerShape(34.dp))
             ) {
                 elements.filter { it.visible }.forEach { element ->
                     val x = (element.x / 100f * 166f).dp
                     val y = (element.y / 100f * 408f).dp
                     Text(
-                        element.preview,
+                        renderElementValue(element, device),
                         color = element.color,
                         fontSize = element.size.sp,
                         modifier = Modifier.padding(start = x, top = y).pointerInput(element.id) {
