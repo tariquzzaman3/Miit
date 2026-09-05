@@ -5,6 +5,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -52,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -317,6 +320,8 @@ private fun BandScreen(
     onEdit: (BandDisplay) -> Unit,
     onNew: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val runtimeInfo = buildString {
         band.batteryPercentage?.let { append("🔋 ").append(it).append("%") }
         if (band.charging == true) append(" • ⚡")
@@ -341,27 +346,44 @@ private fun BandScreen(
 
             if (band.watchfaces.isEmpty()) {
                 item {
-                    Text("No watch-face entries received yet.", color = Color.Gray, fontSize = 13.sp)
+                    Text(
+                        "No watch-face entries received yet.",
+                        color = Color.Gray,
+                        fontSize = 13.sp
+                    )
                 }
             } else {
                 items(band.watchfaces, key = { it.stableId }) { face ->
+                    var previewPath by remember(face.stableId) {
+                        mutableStateOf(face.previewPath)
+                    }
+                    LaunchedEffect(face.stableId) {
+                        if (previewPath == null) {
+                            previewPath = withContext(Dispatchers.IO) {
+                                WatchfacePreviewResolver.find(context, face, band.model)?.file?.absolutePath
+                            }
+                        }
+                    }
                     Card(Modifier.fillMaxWidth()) {
                         Row(
                             Modifier.fillMaxWidth().padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(
-                                Modifier.width(70.dp).height(110.dp)
-                                    .background(Color.Black, RoundedCornerShape(14.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("Preview unavailable", color = Color.Gray, fontSize = 9.sp)
-                            }
+                            PreviewThumb(previewPath)
                             Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                 Text(face.name ?: face.code ?: "Unnamed watch face")
-                                face.code?.let { Text(it, color = Color.Gray, fontSize = 11.sp) }
-                                OutlinedButton(onClick = { onEdit(face) }) { Text("Edit") }
+                                face.code?.let { Text(it, color = Color.Gray, fontSize = 10.sp) }
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    OutlinedButton(onClick = {
+                                        onEdit(face.copy(previewPath = previewPath))
+                                    }) { Text("Edit") }
+                                    OutlinedButton(onClick = {
+                                        val query = Uri.encode((face.name ?: face.code ?: band.name) + " Xiaomi Smart Band watch face")
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=$query"))
+                                        runCatching { context.startActivity(intent) }
+                                    }) { Text("Online") }
+                                }
                             }
                         }
                     }
@@ -373,6 +395,27 @@ private fun BandScreen(
                     Text("＋ Custom display")
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun PreviewThumb(path: String?) {
+    val bitmap = remember(path) {
+        path?.let { runCatching { BitmapFactory.decodeFile(it)?.asImageBitmap() }.getOrNull() }
+    }
+    Box(
+        Modifier.width(76.dp).height(122.dp).background(Color.Black, RoundedCornerShape(15.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = "Watch-face preview",
+                modifier = Modifier.fillMaxSize().padding(3.dp)
+            )
+        } else {
+            Text("Preview\nnot found", color = Color.Gray, fontSize = 9.sp)
         }
     }
 }
