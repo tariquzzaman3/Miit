@@ -185,6 +185,15 @@ fun MiitWatchFaceEditor(
             aodEnabled = aodEnabled,
             onAodChange = { aodEnabled = it },
             onAdd = ::addElement,
+            onModifySelected = { transform ->
+                val index = elements.indexOfFirst { it.id == selectedId }
+                if (index >= 0 && !elements[index].locked) elements[index] = transform(elements[index])
+            },
+            onEditText = {
+                if (elements.firstOrNull { it.id == selectedId }?.type == EditorElementType.TEXT) editingTextId = selectedId
+            },
+            onExport = { onAction("export") },
+            onBand = { onAction("band") },
             onLayerAction = { action ->
                 val selected = elements.indexOfFirst { it.id == selectedId }
                 if (selected < 0) return@SubToolBar
