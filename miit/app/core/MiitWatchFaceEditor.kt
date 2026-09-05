@@ -107,6 +107,17 @@ fun MiitWatchFaceEditor(
     var previewMode by remember { mutableStateOf(false) }
     var aodEnabled by remember { mutableStateOf(false) }
     var editingTextId by remember { mutableIntStateOf(0) }
+    var selectedImageId by remember { mutableIntStateOf(0) }
+
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null && selectedImageId != 0) {
+            val index = elements.indexOfFirst { it.id == selectedImageId }
+            if (index >= 0) {
+                elements[index] = elements[index].copy(preview = uri.toString())
+            }
+        }
+        selectedImageId = 0
+    }
 
     fun addElement(type: EditorElementType) {
         val id = nextId++
@@ -119,6 +130,11 @@ fun MiitWatchFaceEditor(
             size = if (type == EditorElementType.TIME) 36f else 18f
         )
         selectedId = id
+        if (type == EditorElementType.TEXT) editingTextId = id
+        if (type == EditorElementType.IMAGE) {
+            selectedImageId = id
+            imagePicker.launch(arrayOf("image/*"))
+        }
     }
 
     if (editingTextId != 0) {
@@ -128,7 +144,8 @@ fun MiitWatchFaceEditor(
                 initial = item.preview,
                 onDismiss = { editingTextId = 0 },
                 onApply = { value ->
-                    elements[elements.indexOfFirst { it.id == editingTextId }] = elements[elements.indexOfFirst { it.id == editingTextId }].copy(preview = value)
+                    val index = elements.indexOfFirst { it.id == editingTextId }
+                    if (index >= 0) elements[index] = elements[index].copy(preview = value)
                     editingTextId = 0
                 }
             )
