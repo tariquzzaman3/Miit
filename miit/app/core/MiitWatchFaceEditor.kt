@@ -229,6 +229,24 @@ fun MiitWatchFaceEditor(
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
             )
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                ToolGlyph("↶", "Undo") {
+                    undoStack.lastOrNull()?.let { previous ->
+                        redoStack = (redoStack + listOf(elements.toList())).takeLast(40)
+                        undoStack = undoStack.dropLast(1)
+                        elements.clear()
+                        elements.addAll(previous)
+                        selectedId = elements.lastOrNull()?.id ?: 0
+                    }
+                }
+                ToolGlyph("↷", "Redo") {
+                    redoStack.lastOrNull()?.let { next ->
+                        undoStack = (undoStack + listOf(elements.toList())).takeLast(40)
+                        redoStack = redoStack.dropLast(1)
+                        elements.clear()
+                        elements.addAll(next)
+                        selectedId = elements.lastOrNull()?.id ?: 0
+                    }
+                }
                 ToolGlyph("⌁", "Preview") { previewMode = true }
                 ToolGlyph("✓", "Save") {
                     WatchfaceProjectStore.save(
