@@ -372,6 +372,10 @@ private fun WatchCanvasV2(
                     .height((190f * profile.height / profile.width).dp)
                     .background(Color.Black, RoundedCornerShape(34.dp))
             ) {
+                display?.previewPath?.let { preview ->
+                    val bitmap = remember(preview) { runCatching { BitmapFactory.decodeFile(preview)?.asImageBitmap() }.getOrNull() }
+                    if (bitmap != null) Image(bitmap, "Watch-face preview", Modifier.fillMaxSize())
+                }
                 elements.filter { it.visible }.forEach { element ->
                     val x = (element.x / 100f * 166f).dp
                     val y = (element.y / 100f * 408f).dp
