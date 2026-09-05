@@ -99,6 +99,10 @@ class MainActivity : ComponentActivity() {
             arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_EXTERNAL_STORAGE)
         }
         permissionLauncher.launch(permissions)
+        runCatching {
+            val serviceIntent = Intent(this, MiitConnectionService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent) else startService(serviceIntent)
+        }.onFailure { MiitTestLog.add("Miit connection service start failed: ${it.javaClass.simpleName}") }
         setContent { MiitApp() }
     }
 
