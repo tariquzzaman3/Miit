@@ -85,9 +85,13 @@ fun MiitWatchFaceEditor(
     val profile = remember(device?.model, device?.name) { resolveProfile(device) }
     val elements = remember(display?.stableId) {
         mutableStateListOf<EditorElement>().apply {
-            // Never fabricate data over an existing band watchface/menu item.
-            // New projects may start with a small editable starter face.
-            // New projects start empty. Preview values are supplied only when the device actually reports them.
+            if (display == null) {
+                add(EditorElement(1, EditorElementType.TIME, "", 50f, 34f, 40f, format = "HH:mm"))
+                add(EditorElement(2, EditorElementType.DATE, "", 50f, 50f, 17f, format = "DD MMM"))
+                if (device?.batteryPercentage != null) {
+                    add(EditorElement(3, EditorElementType.BATTERY, "", 50f, 63f, 16f))
+                }
+            }
         }
     }
     var nextId by remember(display?.stableId) { mutableIntStateOf(elements.maxOfOrNull { it.id }?.plus(1) ?: 1) }
