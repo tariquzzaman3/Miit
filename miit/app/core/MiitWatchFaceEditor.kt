@@ -440,9 +440,9 @@ private fun WatchCanvasV2(
                         }
                     )
                 }
-                if (metadataOnly) {
+                if (metadataOnly && display?.previewPath == null) {
                     Text(
-                        "Band resource preview unavailable",
+                        "No saved preview found • use Media to add a reference image",
                         color = Color.Gray,
                         fontSize = 10.sp,
                         modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp)
