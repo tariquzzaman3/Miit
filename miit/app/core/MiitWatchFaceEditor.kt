@@ -120,7 +120,7 @@ fun MiitWatchFaceEditor(
             }
         }
     }
-    var nextId by remember(display?.stableId) { mutableIntStateOf(elements.maxOfOrNull { it.id }?.plus(1) ?: 1) }
+    var nextId by remember(display?.stableId, savedProject?.absolutePath) { mutableIntStateOf(elements.maxOfOrNull { it.id }?.plus(1) ?: 1) }
     var selectedId by remember { mutableIntStateOf(elements.firstOrNull()?.id ?: 0) }
     var selectedTool by remember { mutableStateOf(ToolCategory.ADD) }
     var previewMode by remember { mutableStateOf(false) }
