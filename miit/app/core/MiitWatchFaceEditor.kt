@@ -585,24 +585,33 @@ private fun TextEditDialog(
 }
 
 @Composable
+@Composable
 private fun MiCreateSourceDialog(
     onDismiss: () -> Unit,
     onSelect: (String) -> Unit
 ) {
-    val sources = MiCreateCatalog.band9Sources
+    val sources = MiCreateCatalog.band9Sources.filter { it.idFprj != "0" }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Mi-Create data source") },
+        title = { Text("Digital data source") },
         text = {
-            LazyColumn {
-                items(sources.filter { it.idFprj != "0" }) { source ->
-                    TextButton(
-                        onClick = { onSelect(source.name) },
-                        modifier = Modifier.fillMaxWidth()
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                items(sources) { source ->
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .clickable { onSelect(source.name) }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(Modifier.fillMaxWidth()) {
-                            Text(source.name)
-                            Text(source.idFprj, color = Color.Gray, fontSize = 8.sp)
+                        DigitalSourcePreview(source.name)
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(source.name, color = Color.White, fontSize = 11.sp)
+                            Text(
+                                source.description.ifBlank { source.idFprj },
+                                color = Color.Gray,
+                                fontSize = 8.sp
+                            )
                         }
                     }
                 }
@@ -611,6 +620,45 @@ private fun MiCreateSourceDialog(
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
     )
 }
+
+@Composable
+private fun DigitalSourcePreview(name: String) {
+    val sample = when (name) {
+        "Hour" -> "14"
+        "Hour Low" -> "4"
+        "Hour High" -> "1"
+        "Minute" -> "37"
+        "Minute Low" -> "7"
+        "Minute High" -> "3"
+        "Second" -> "52"
+        "Second Low" -> "2"
+        "Second High" -> "5"
+        "Day" -> "26"
+        "Day Low" -> "6"
+        "Day High" -> "2"
+        "Week" -> "MON"
+        "Month" -> "09"
+        "Year" -> "2026"
+        "AM/PM" -> "PM"
+        "Battery percent" -> "86%"
+        "Heart rate" -> "72"
+        "Current step count" -> "8421"
+        "Current step (percent)" -> "84%"
+        "Active Calorie" -> "326"
+        "Sleep score" -> "88"
+        "Weather temp (C)" -> "27°"
+        else -> "12"
+    }
+    Box(
+        Modifier.width(52.dp).height(34.dp)
+            .background(Color.Black, RoundedCornerShape(6.dp))
+            .padding(3.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(sample, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
 
 
 @Composable
