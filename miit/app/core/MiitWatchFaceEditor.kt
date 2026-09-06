@@ -318,6 +318,12 @@ fun MiitWatchFaceEditor(
             aodEnabled = aodEnabled,
             onAodChange = { aodEnabled = it },
             onAdd = ::addElement,
+            onAddSource = { name ->
+                val source = MiCreateCatalog.band9Sources.firstOrNull { it.name == name }
+                val id = nextId++
+                elements += EditorElement(id, EditorElementType.DIGITAL_NUMBER, source?.name ?: name, source?.idFprj ?: "0", 50f, 50f, 22f)
+                selectedId = id
+            },
             onPickImage = {
                 val id = if (selectedId != 0) selectedId else nextId++
                 if (selectedId == 0) {
@@ -454,6 +460,7 @@ private fun SubToolBar(
     aodEnabled: Boolean,
     onAodChange: (Boolean) -> Unit,
     onAdd: (EditorElementType) -> Unit,
+    onAddSource: (String) -> Unit,
     onPickImage: () -> Unit,
     onReference: () -> Unit,
     onSourcePicker: () -> Unit,
@@ -473,7 +480,7 @@ private fun SubToolBar(
             SubAction("◷", "Analog") { onAdd(EditorElementType.ANALOG_CLOCK) },
             SubAction("◔", "Arc") { onAdd(EditorElementType.ARC_PROGRESS) },
             SubAction("━", "Line") { onAdd(EditorElementType.LINE_PROGRESS) },
-            SubAction("▢", "Container") { onAdd(EditorElementType.CONTAINER) },
+            SubAction("◇", "Shapes") { onAdd(EditorElementType.RECTANGLE) },
             SubAction("T", "Text") { onAdd(EditorElementType.TEXT) }
         )
         ToolCategory.TEXT -> listOf(
@@ -488,18 +495,20 @@ private fun SubToolBar(
         )
         ToolCategory.DATA -> listOf(
             SubAction("Src", "Source") { onSourcePicker() },
-            SubAction("♥", "Heart") { onAdd(EditorElementType.DIGITAL_NUMBER) },
+            SubAction("12", "Digital") { onAdd(EditorElementType.DIGITAL_NUMBER) },
+            SubAction("H", "Hour") { onAddSource("Hour") },
+            SubAction("M", "Minute") { onAddSource("Minute") },
+            SubAction("S", "Second") { onAddSource("Second") },
+            SubAction("♥", "Heart") { onAddSource("Heart rate") },
             SubAction("O₂", "SpO₂") { onAdd(EditorElementType.SPO2) },
-            SubAction("↟", "Steps") { onAdd(EditorElementType.STEPS) },
-            SubAction("▣", "Battery") { onAdd(EditorElementType.BATTERY) },
-            SubAction("Cal", "Active Cal") { onAdd(EditorElementType.DIGITAL_NUMBER) },
-            SubAction("%", "Goals") { onAdd(EditorElementType.DIGITAL_NUMBER) },
-            SubAction("☾", "Sleep") { onAdd(EditorElementType.DIGITAL_NUMBER) },
-            SubAction("⚡", "Charge") { onAdd(EditorElementType.DIGITAL_NUMBER) },
-            SubAction("°", "Temp") { onAdd(EditorElementType.DIGITAL_NUMBER) },
-            SubAction("≋", "Pressure") { onAdd(EditorElementType.DIGITAL_NUMBER) },
-            SubAction("↟", "Elevation") { onAdd(EditorElementType.DIGITAL_NUMBER) },
-            SubAction("☁", "Weather") { onAdd(EditorElementType.DIGITAL_NUMBER) }
+            SubAction("↟", "Steps") { onAddSource("Current step count") },
+            SubAction("▣", "Battery") { onAddSource("Battery percent") },
+            SubAction("Cal", "Calories") { onAddSource("Active Calorie") },
+            SubAction("%", "Goal") { onAddSource("Current step (percent)") },
+            SubAction("☾", "Sleep") { onAddSource("Sleep score") },
+            SubAction("⚡", "Charge") { onAddSource("BT connection status") },
+            SubAction("°", "Temp") { onAddSource("Weather temp (C)") },
+            SubAction("☁", "Weather") { onAddSource("Weather type (icon)") }
         )
         ToolCategory.SHAPE -> listOf(
             SubAction("○", "Circle") { onAdd(EditorElementType.CIRCLE) },
