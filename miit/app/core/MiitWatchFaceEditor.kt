@@ -79,7 +79,7 @@ private enum class ToolCategory(val icon: String, val title: String) {
 internal enum class EditorElementType {
     TIME, DATE, WEEKDAY, HEART_RATE, SPO2, STEPS, BATTERY, CALORIES,
     DISTANCE, SLEEP, WEATHER, DIGITAL_NUMBER, ANALOG_CLOCK, ANALOG_HAND, CLOCK_FACE, ARC_PROGRESS,
-    LINE_PROGRESS, CONTAINER, TEXT, CIRCLE, RECTANGLE, LINE, ARC, IMAGE
+    LINE_PROGRESS, CONTAINER, TEXT, CIRCLE, RECTANGLE, ROUNDED_RECTANGLE, ELLIPSE, TRIANGLE, LINE, ARC, IMAGE
 }
 
 internal data class EditorElement(
@@ -520,7 +520,10 @@ private fun SubToolBar(
         )
         ToolCategory.SHAPE -> listOf(
             SubAction("○", "Circle") { onAdd(EditorElementType.CIRCLE) },
+            SubAction("▭", "Round") { onAdd(EditorElementType.ROUNDED_RECTANGLE) },
             SubAction("□", "Rect") { onAdd(EditorElementType.RECTANGLE) },
+            SubAction("⬭", "Ellipse") { onAdd(EditorElementType.ELLIPSE) },
+            SubAction("△", "Triangle") { onAdd(EditorElementType.TRIANGLE) },
             SubAction("／", "Line") { onAdd(EditorElementType.LINE) },
             SubAction("◔", "Arc") { onAdd(EditorElementType.ARC) }
         )
