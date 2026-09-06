@@ -3,8 +3,8 @@ package com.miit.app
 import org.json.JSONArray
 import java.io.File
 
-object SavedWatchfaceLoader {
-    fun load(file: File): List<EditorElement> {
+internal object SavedWatchfaceLoader {
+    internal fun load(file: File): List<EditorElement> {
         val raw = runCatching { file.readText() }.getOrNull() ?: return emptyList()
         return runCatching {
             val array = JSONArray(raw.substring(raw.indexOf('['), raw.lastIndexOf(']') + 1))
