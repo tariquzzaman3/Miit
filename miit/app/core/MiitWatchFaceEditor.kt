@@ -107,7 +107,7 @@ fun MiitWatchFaceEditor(
 ) {
     val context = LocalContext.current
     val profile = remember(device?.model, device?.name) { resolveProfile(device) }
-    val elements = remember(display?.stableId) {
+    val elements = remember(display?.stableId, savedProject?.absolutePath) {
         mutableStateListOf<EditorElement>().apply {
             if (display == null) {
                 add(EditorElement(1, EditorElementType.TIME, "", 50f, 34f, 40f, format = "HH:mm"))
