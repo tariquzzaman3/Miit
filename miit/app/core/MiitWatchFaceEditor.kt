@@ -109,7 +109,9 @@ fun MiitWatchFaceEditor(
     val profile = remember(device?.model, device?.name) { resolveProfile(device) }
     val elements = remember(display?.stableId, savedProject?.absolutePath) {
         mutableStateListOf<EditorElement>().apply {
-            if (display == null) {
+            if (savedProject != null) {
+                addAll(SavedWatchfaceLoader.load(savedProject))
+            } else if (display == null) {
                 add(EditorElement(1, EditorElementType.TIME, "", 50f, 34f, 40f, format = "HH:mm"))
                 add(EditorElement(2, EditorElementType.DATE, "", 50f, 50f, 17f, format = "DD MMM"))
                 if (device?.batteryPercentage != null) {
