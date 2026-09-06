@@ -1127,19 +1127,52 @@ private fun EditorPropertiesDialog(
     var x by remember(element.id) { mutableStateOf(element.x.toString()) }
     var y by remember(element.id) { mutableStateOf(element.y.toString()) }
     var format by remember(element.id) { mutableStateOf(element.format) }
+    var length by remember(element.id) { mutableStateOf(element.length.toString()) }
+    var thickness by remember(element.id) { mutableStateOf(element.thickness.toString()) }
+    var rotation by remember(element.id) { mutableStateOf(element.rotation.toString()) }
+    var cornerRadius by remember(element.id) { mutableStateOf(element.cornerRadius.toString()) }
+    var filled by remember(element.id) { mutableStateOf(element.filled) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Element properties") },
+        title = { Text(element.type.name.replace('_', ' ')) },
         text = {
-            LazyColumn {
-                item { Text(element.type.name.replace('_', ' '), color = Color.Gray, fontSize = 11.sp) }
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 item { OutlinedTextField(x, { x = it }, label = { Text("X %") }, singleLine = true) }
                 item { OutlinedTextField(y, { y = it }, label = { Text("Y %") }, singleLine = true) }
-                item { OutlinedTextField(size, { size = it }, label = { Text("Size") }, singleLine = true) }
+                item { OutlinedTextField(size, { size = it }, label = { Text("Font/size") }, singleLine = true) }
+                if (element.type == EditorElementType.ANALOG_HAND) {
+                    item { Text("Hand: " + element.handKind, color = Color.Gray, fontSize = 11.sp) }
+                    item { OutlinedTextField(length, { length = it }, label = { Text("Length %") }, singleLine = true) }
+                    item { OutlinedTextField(thickness, { thickness = it }, label = { Text("Thickness") }, singleLine = true) }
+                    item { OutlinedTextField(rotation, { rotation = it }, label = { Text("Rotation offset °") }, singleLine = true) }
+                }
+                if (element.type in setOf(
+                    EditorElementType.CIRCLE, EditorElementType.RECTANGLE, EditorElementType.ROUNDED_RECTANGLE,
+                    EditorElementType.ELLIPSE, EditorElementType.TRIANGLE, EditorElementType.LINE, EditorElementType.ARC,
+                    EditorElementType.ARC_PROGRESS, EditorElementType.LINE_PROGRESS, EditorElementType.CLOCK_FACE
+                )) {
+                    item { OutlinedTextField(thickness, { thickness = it }, label = { Text("Stroke thickness") }, singleLine = true) }
+                    item { OutlinedTextField(rotation, { rotation = it }, label = { Text("Rotation °") }, singleLine = true) }
+                }
+                if (element.type == EditorElementType.ROUNDED_RECTANGLE) {
+                    item { OutlinedTextField(cornerRadius, { cornerRadius = it }, label = { Text("Corner radius") }, singleLine = true) }
+                }
+                if (element.type in setOf(
+                    EditorElementType.CIRCLE, EditorElementType.RECTANGLE, EditorElementType.ROUNDED_RECTANGLE,
+                    EditorElementType.ELLIPSE, EditorElementType.TRIANGLE
+                )) {
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Filled", color = Color.White, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { filled = !filled }) { Text(if (filled) "ON" else "OFF") }
+                        }
+                    }
+                }
                 if (element.type == EditorElementType.TIME || element.type == EditorElementType.DATE || element.type == EditorElementType.WEEKDAY) {
                     item { OutlinedTextField(format, { format = it }, label = { Text("Format") }, singleLine = true) }
                     item {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             val presets = when (element.type) {
                                 EditorElementType.TIME -> listOf("H", "HH", "h", "hh", "H:mm", "HH:mm", "h:mm", "hh:mm", "HH:mm:ss")
                                 EditorElementType.DATE -> listOf("DD", "DD/MM", "MM/DD", "DD MMM", "DD MMM YYYY")
@@ -1157,8 +1190,13 @@ private fun EditorPropertiesDialog(
                     element.copy(
                         x = x.toFloatOrNull()?.coerceIn(0f, 100f) ?: element.x,
                         y = y.toFloatOrNull()?.coerceIn(0f, 100f) ?: element.y,
-                        size = size.toFloatOrNull()?.coerceIn(8f, 72f) ?: element.size,
-                        format = format
+                        size = size.toFloatOrNull()?.coerceIn(0.1f, 72f) ?: element.size,
+                        format = format,
+                        length = length.toFloatOrNull()?.coerceIn(1f, 100f) ?: element.length,
+                        thickness = thickness.toFloatOrNull()?.coerceIn(0.5f, 20f) ?: element.thickness,
+                        rotation = rotation.toFloatOrNull() ?: element.rotation,
+                        cornerRadius = cornerRadius.toFloatOrNull()?.coerceIn(0f, 50f) ?: element.cornerRadius,
+                        filled = filled
                     )
                 )
             }) { Text("Apply") }
@@ -1166,6 +1204,7 @@ private fun EditorPropertiesDialog(
         dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
+
 
 @Composable
 private fun FullPreview(
