@@ -1240,7 +1240,7 @@ private fun resolveProfile(device: BandDevice?): DeviceProfile {
 
 private fun serializeElements(elements: List<EditorElement>): String =
     elements.joinToString(prefix = "[", postfix = "]") { e ->
-        "{\"id\":${e.id},\"type\":\"${e.type.name}\",\"preview\":\"${jsonEscape(e.preview)}\",\"x\":${e.x},\"y\":${e.y},\"size\":${e.size},\"visible\":${e.visible},\"locked\":${e.locked}}"
+        "{\"id\":${e.id},\"type\":\"${e.type.name}\",\"preview\":\"${jsonEscape(e.preview)}\",\"x\":${e.x},\"y\":${e.y},\"size\":${e.size},\"color\":\"${e.color.value.toLong().toString(16)}\",\"bold\":${e.bold},\"alignment\":\"${jsonEscape(e.alignment)}\",\"format\":\"${jsonEscape(e.format)}\",\"handKind\":\"${jsonEscape(e.handKind)}\",\"length\":${e.length},\"thickness\":${e.thickness},\"rotation\":${e.rotation},\"filled\":${e.filled},\"cornerRadius\":${e.cornerRadius},\"visible\":${e.visible},\"locked\":${e.locked}}"
     }
 
 private fun jsonEscape(value: String): String =
@@ -1265,8 +1265,13 @@ private fun livePreview(type: EditorElementType, device: BandDevice?): String = 
     EditorElementType.ARC_PROGRESS -> ""
     EditorElementType.LINE_PROGRESS -> ""
     EditorElementType.CONTAINER -> ""
+    EditorElementType.ANALOG_HAND -> ""
+    EditorElementType.CLOCK_FACE -> ""
     EditorElementType.CIRCLE -> "○"
     EditorElementType.RECTANGLE -> "□"
+    EditorElementType.ROUNDED_RECTANGLE -> "▭"
+    EditorElementType.ELLIPSE -> "⬭"
+    EditorElementType.TRIANGLE -> "△"
     EditorElementType.LINE -> "—"
     EditorElementType.ARC -> "◔"
 }
