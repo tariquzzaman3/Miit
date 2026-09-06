@@ -128,7 +128,6 @@ private fun MiitApp() {
     var editingDisplay by remember { mutableStateOf<BandDisplay?>(null) }
     var savedProject by remember { mutableStateOf<java.io.File?>(null) }
     var savedProjectsRefresh by remember { mutableStateOf(0) }
-    var themeMode by remember { mutableStateOf(MiitSettingsStore.theme(context)) }
     var screen by remember { mutableStateOf(if (devices.any { it.authenticated }) MiitScreen.BAND else MiitScreen.CONNECTION) }
     var themeMode by remember { mutableStateOf(MiitSettingsStore.theme(context)) }
     var showHelp by remember { mutableStateOf(false) }
@@ -286,6 +285,7 @@ private fun MiitApp() {
                 onDocs = { openExternal(context, "https://github.com/tariquzzaman3/Miit") },
                 onRelease = { openExternal(context, "https://github.com/tariquzzaman3/Miit/releases/latest") }
             )
+        }
         FloatingActionButton(
             onClick = {
                 val text = MiitTestLog.text(context)
