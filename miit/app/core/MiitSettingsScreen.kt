@@ -77,7 +77,7 @@ private object AiKeyStore {
     }.getOrDefault("")
 }
 
-private data class GithubLatest(val tag: String, val url: String)
+data class GithubLatest(val tag: String, val url: String)
 
 object GithubRelease {
     fun latest(): Result<GithubLatest> = runCatching {
@@ -136,7 +136,7 @@ fun MiitSettingsScreen(
                     updateText = "Checking…"
                     Thread {
                         val result = GithubRelease.latest()
-                        val message = result.fold({ if (it.tag == BuildConfig.VERSION_NAME) "MIIT is up to date (${it.tag})." else "Update available: ${it.tag}." }, { "Update check failed." })
+                        val message = result.fold({ if (it.tag == "0.1.0") "MIIT is up to date (${it.tag})." else "Update available: ${it.tag}." }, { "Update check failed." })
                         android.os.Handler(android.os.Looper.getMainLooper()).post {
                             updateText = message
                             result.getOrNull()?.let { if (it.tag != BuildConfig.VERSION_NAME) onRelease() }
