@@ -321,7 +321,15 @@ fun MiitWatchFaceEditor(
             onAddSource = { name ->
                 val source = MiCreateCatalog.band9Sources.firstOrNull { it.name == name }
                 val id = nextId++
-                elements += EditorElement(id, EditorElementType.DIGITAL_NUMBER, source?.name ?: name, source?.idFprj ?: "0", 50f, 50f, 22f)
+                elements += EditorElement(
+                    id = id,
+                    type = EditorElementType.DIGITAL_NUMBER,
+                    preview = source?.name ?: name,
+                    x = 50f,
+                    y = 50f,
+                    size = 22f,
+                    format = source?.idFprj ?: "0"
+                )
                 selectedId = id
             },
             onPickImage = {
