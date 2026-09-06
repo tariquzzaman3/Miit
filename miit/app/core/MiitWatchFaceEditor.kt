@@ -89,6 +89,8 @@ internal data class EditorElement(
     val x: Float = 50f,
     val y: Float = 50f,
     val size: Float = 24f,
+    val width: Float = 76f,
+    val height: Float = 55f,
     val color: Color = Color.White,
     val visible: Boolean = true,
     val locked: Boolean = false,
@@ -630,7 +632,6 @@ private fun TextEditDialog(
     )
 }
 
-@Composable
 @Composable
 private fun MiCreateSourceDialog(
     onDismiss: () -> Unit,
