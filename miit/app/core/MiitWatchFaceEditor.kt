@@ -315,9 +315,14 @@ fun MiitWatchFaceEditor(
         // BAR 2 — contextual sub-tools, horizontally swipeable.
         SubToolBar(
             category = selectedTool,
+            selected = elements.firstOrNull { it.id == selectedId },
             aodEnabled = aodEnabled,
             onAodChange = { aodEnabled = it },
             onAdd = ::addElement,
+            selectHandByName = { hand ->
+                val idx = elements.indexOfFirst { it.type == EditorElementType.ANALOG_HAND && it.handKind == hand }
+                if (idx >= 0) selectedId = elements[idx].id
+            },
             onAddSource = { name ->
                 val source = MiCreateCatalog.band9Sources.firstOrNull { it.name == name }
                 val id = nextId++
@@ -465,10 +470,12 @@ private fun HorizontalToolBar(
 @Composable
 private fun SubToolBar(
     category: ToolCategory,
+    selected: EditorElement?,
     aodEnabled: Boolean,
     onAodChange: (Boolean) -> Unit,
     onAdd: (EditorElementType) -> Unit,
     onAddSource: (String) -> Unit,
+    selectHandByName: (String) -> Unit,
     onPickImage: () -> Unit,
     onReference: () -> Unit,
     onSourcePicker: () -> Unit,
@@ -501,23 +508,59 @@ private fun SubToolBar(
             SubAction("C", "Center") { onModifySelected { it.copy(alignment = "Center", x = 50f) } },
             SubAction("R", "Right") { onModifySelected { it.copy(alignment = "Right", x = 88f) } }
         )
-        ToolCategory.DATA -> listOf(
-            SubAction("Src", "Source") { onSourcePicker() },
-            SubAction("12", "Digital") { onAdd(EditorElementType.DIGITAL_NUMBER) },
-            SubAction("H", "Hour") { onAddSource("Hour") },
-            SubAction("M", "Minute") { onAddSource("Minute") },
-            SubAction("S", "Second") { onAddSource("Second") },
-            SubAction("♥", "Heart") { onAddSource("Heart rate") },
-            SubAction("O₂", "SpO₂") { onAdd(EditorElementType.SPO2) },
-            SubAction("↟", "Steps") { onAddSource("Current step count") },
-            SubAction("▣", "Battery") { onAddSource("Battery percent") },
-            SubAction("Cal", "Calories") { onAddSource("Active Calorie") },
-            SubAction("%", "Goal") { onAddSource("Current step (percent)") },
-            SubAction("☾", "Sleep") { onAddSource("Sleep score") },
-            SubAction("⚡", "Charge") { onAddSource("BT connection status") },
-            SubAction("°", "Temp") { onAddSource("Weather temp (C)") },
-            SubAction("☁", "Weather") { onAddSource("Weather type (icon)") }
-        )
+        ToolCategory.DATA -> {
+            if (selected?.type == EditorElementType.ANALOG_HAND) {
+                listOf(
+                    SubAction("H", selected.handKind.ifBlank { "Hand" }) { },
+                    SubAction("L+", "Length+") { onModifySelected { it.copy(length = (it.length + 5f).coerceAtMost(95f)) } },
+                    SubAction("L−", "Length−") { onModifySelected { it.copy(length = (it.length - 5f).coerceAtLeast(10f)) } },
+                    SubAction("T+", "Thick+") { onModifySelected { it.copy(thickness = (it.thickness + 0.5f).coerceAtMost(10f)) } },
+                    SubAction("T−", "Thick−") { onModifySelected { it.copy(thickness = (it.thickness - 0.5f).coerceAtLeast(0.5f)) } },
+                    SubAction("W", "White") { onModifySelected { it.copy(color = Color.White) } },
+                    SubAction("R", "Red") { onModifySelected { it.copy(color = Color(0xFFFF5B5B)) } },
+                    SubAction("B", "Blue") { onModifySelected { it.copy(color = Color(0xFF55B7FF)) } },
+                    SubAction("H", "Hour") { selectHandByName("Hour") },
+                    SubAction("M", "Minute") { selectHandByName("Minute") },
+                    SubAction("S", "Second") { selectHandByName("Second") }
+                )
+            } else if (selected?.type == EditorElementType.ARC_PROGRESS || selected?.type == EditorElementType.ARC) {
+                listOf(
+                    SubAction("T+", "Thick+") { onModifySelected { it.copy(thickness = (it.thickness + 0.5f).coerceAtMost(12f)) } },
+                    SubAction("T−", "Thick−") { onModifySelected { it.copy(thickness = (it.thickness - 0.5f).coerceAtLeast(0.5f)) } },
+                    SubAction("S", "Start−") { onModifySelected { it.copy(rotation = it.rotation - 10f) } },
+                    SubAction("E", "End+") { onModifySelected { it.copy(rotation = it.rotation + 10f) } },
+                    SubAction("W", "White") { onModifySelected { it.copy(color = Color.White) } },
+                    SubAction("C", "Cyan") { onModifySelected { it.copy(color = Color(0xFF55E6E6)) } }
+                )
+            } else if (selected?.type == EditorElementType.LINE_PROGRESS || selected?.type == EditorElementType.LINE) {
+                listOf(
+                    SubAction("L+", "Length+") { onModifySelected { it.copy(length = (it.length + 5f).coerceAtMost(100f)) } },
+                    SubAction("L−", "Length−") { onModifySelected { it.copy(length = (it.length - 5f).coerceAtLeast(10f)) } },
+                    SubAction("T+", "Thick+") { onModifySelected { it.copy(thickness = (it.thickness + 0.5f).coerceAtMost(12f)) } },
+                    SubAction("T−", "Thick−") { onModifySelected { it.copy(thickness = (it.thickness - 0.5f).coerceAtLeast(0.5f)) } },
+                    SubAction("↻", "Rotate") { onModifySelected { it.copy(rotation = (it.rotation + 15f) % 360f) } },
+                    SubAction("W", "White") { onModifySelected { it.copy(color = Color.White) } }
+                )
+            } else {
+                listOf(
+                    SubAction("Src", "Source") { onSourcePicker() },
+                    SubAction("12", "Digital") { onAdd(EditorElementType.DIGITAL_NUMBER) },
+                    SubAction("H", "Hour") { onAddSource("Hour") },
+                    SubAction("M", "Minute") { onAddSource("Minute") },
+                    SubAction("S", "Second") { onAddSource("Second") },
+                    SubAction("♥", "Heart") { onAddSource("Heart rate") },
+                    SubAction("O₂", "SpO₂") { onAdd(EditorElementType.SPO2) },
+                    SubAction("↟", "Steps") { onAddSource("Current step count") },
+                    SubAction("▣", "Battery") { onAddSource("Battery percent") },
+                    SubAction("Cal", "Calories") { onAddSource("Active Calorie") },
+                    SubAction("%", "Goal") { onAddSource("Current step (percent)") },
+                    SubAction("☾", "Sleep") { onAddSource("Sleep score") },
+                    SubAction("⚡", "Charge") { onAddSource("BT connection status") },
+                    SubAction("°", "Temp") { onAddSource("Weather temp (C)") },
+                    SubAction("☁", "Weather") { onAddSource("Weather type (icon)") }
+                )
+            }
+        }
         ToolCategory.SHAPE -> listOf(
             SubAction("○", "Circle") { onAdd(EditorElementType.CIRCLE) },
             SubAction("▭", "Round") { onAdd(EditorElementType.ROUNDED_RECTANGLE) },
