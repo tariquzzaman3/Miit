@@ -129,6 +129,7 @@ private fun MiitApp() {
     var savedProjectsRefresh by remember { mutableStateOf(0) }
     var themeMode by remember { mutableStateOf(MiitSettingsStore.theme(context)) }
     var screen by remember { mutableStateOf(if (devices.any { it.authenticated }) MiitScreen.BAND else MiitScreen.CONNECTION) }
+    var themeMode by remember { mutableStateOf(MiitSettingsStore.theme(context)) }
     var showHelp by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
@@ -206,7 +207,10 @@ private fun MiitApp() {
     }
 
     BackHandler(enabled = screen != MiitScreen.CONNECTION) {
-        if (screen == MiitScreen.EDITOR) screen = MiitScreen.BAND
+        screen = when (screen) {
+            MiitScreen.EDITOR, MiitScreen.SETTINGS -> MiitScreen.BAND
+            else -> screen
+        }
     }
     DisposableEffect(Unit) {
         onDispose {
@@ -215,6 +219,14 @@ private fun MiitApp() {
         }
     }
 
+    val darkTheme = when (themeMode) {
+        "dark" -> true
+        "light" -> false
+        else -> isSystemInDarkTheme()
+    }
+    MaterialTheme(
+        colorScheme = if (darkTheme) androidx.compose.material3.darkColorScheme() else androidx.compose.material3.lightColorScheme()
+    ) {
     Box(Modifier.fillMaxSize()) {
         when (screen) {
             MiitScreen.CONNECTION -> ConnectionScreen(
@@ -262,7 +274,7 @@ private fun MiitApp() {
                 }
             )
         }
-            MiitScreen.SETTINGS -> MiitSettingsScreen(themeMode, { themeMode = it; MiitSettingsStore.setTheme(context, it) }, { screen = MiitScreen.BAND })
+            MiitScreen.SETTINGS -> MiitSettingsScreen(themeMode, { themeMode = it; MiitSettingsStore.setTheme(context, it) }, MiitSettingsStore.aiProvider(context), { MiitSettingsStore.setAiProvider(context, it) }, MiitSettingsStore.aiApiKey(context), { MiitSettingsStore.setAiApiKey(context, it) }, { screen = MiitScreen.BAND }, { openExternal(context, "https://github.com/tariquzzaman3/Miit") }, { openExternal(context, "https://github.com/tariquzzaman3/Miit") }, { openExternal(context, "https://github.com/tariquzzaman3/Miit/releases/latest") })
         FloatingActionButton(
             onClick = {
                 val text = MiitTestLog.text(context)
@@ -277,6 +289,7 @@ private fun MiitApp() {
 
     if (showHelp) AuthKeyInstructionsDialog(onDismiss = { showHelp = false })
     // Multiple extracted keys are tested automatically.
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
