@@ -100,6 +100,7 @@ private data class EditorElement(
 @Composable
 fun MiitWatchFaceEditor(
     display: BandDisplay?,
+    savedProject: java.io.File? = null,
     device: BandDevice?,
     onBack: () -> Unit,
     onAction: (String) -> Unit
