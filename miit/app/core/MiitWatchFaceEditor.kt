@@ -78,7 +78,7 @@ private enum class ToolCategory(val icon: String, val title: String) {
 
 internal enum class EditorElementType {
     TIME, DATE, WEEKDAY, HEART_RATE, SPO2, STEPS, BATTERY, CALORIES,
-    DISTANCE, SLEEP, WEATHER, DIGITAL_NUMBER, ANALOG_CLOCK, ARC_PROGRESS,
+    DISTANCE, SLEEP, WEATHER, DIGITAL_NUMBER, ANALOG_CLOCK, ANALOG_HAND, CLOCK_FACE, ARC_PROGRESS,
     LINE_PROGRESS, CONTAINER, TEXT, CIRCLE, RECTANGLE, LINE, ARC, IMAGE
 }
 
@@ -94,7 +94,13 @@ internal data class EditorElement(
     val locked: Boolean = false,
     val bold: Boolean = false,
     val alignment: String = "Center",
-    val format: String = ""
+    val format: String = "",
+    val handKind: String = "",
+    val length: Float = 60f,
+    val thickness: Float = 2f,
+    val rotation: Float = 0f,
+    val filled: Boolean = false,
+    val cornerRadius: Float = 0f
 )
 
 @Composable
@@ -164,6 +170,18 @@ fun MiitWatchFaceEditor(
 
     fun addElement(type: EditorElementType) {
         snapshotBeforeChange()
+        if (type == EditorElementType.ANALOG_CLOCK) {
+            val faceId = nextId++
+            val hourId = nextId++
+            val minuteId = nextId++
+            val secondId = nextId++
+            elements += EditorElement(faceId, EditorElementType.CLOCK_FACE, "", 50f, 48f, 0f, thickness = 2f, width = 100f, height = 100f)
+            elements += EditorElement(hourId, EditorElementType.ANALOG_HAND, "", 50f, 48f, 0f, color = Color.White, handKind = "Hour", length = 36f, thickness = 5f)
+            elements += EditorElement(minuteId, EditorElementType.ANALOG_HAND, "", 50f, 48f, 0f, color = Color.White, handKind = "Minute", length = 52f, thickness = 3.5f)
+            elements += EditorElement(secondId, EditorElementType.ANALOG_HAND, "", 50f, 48f, 0f, color = Color(0xFFFF5B5B), handKind = "Second", length = 60f, thickness = 1.5f)
+            selectedId = hourId
+            return
+        }
         val id = nextId++
         elements += EditorElement(
             id = id,
