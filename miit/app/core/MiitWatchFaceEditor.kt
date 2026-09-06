@@ -76,7 +76,7 @@ private enum class ToolCategory(val icon: String, val title: String) {
     EXPORT("⇩", "Export")
 }
 
-private enum class EditorElementType {
+internal enum class EditorElementType {
     TIME, DATE, WEEKDAY, HEART_RATE, SPO2, STEPS, BATTERY, CALORIES,
     DISTANCE, SLEEP, WEATHER, DIGITAL_NUMBER, ANALOG_CLOCK, ARC_PROGRESS,
     LINE_PROGRESS, CONTAINER, TEXT, CIRCLE, RECTANGLE, LINE, ARC, IMAGE
