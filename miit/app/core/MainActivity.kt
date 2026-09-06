@@ -126,6 +126,7 @@ private fun MiitApp() {
     var automaticKeyIndex by remember { mutableStateOf(0) }
     var editingDisplay by remember { mutableStateOf<BandDisplay?>(null) }
     var savedProject by remember { mutableStateOf<java.io.File?>(null) }
+    var savedProject by remember { mutableStateOf<java.io.File?>(null) }
     var savedProjectsVersion by remember { mutableStateOf(0) }
     var screen by remember { mutableStateOf(if (devices.any { it.authenticated }) MiitScreen.BAND else MiitScreen.CONNECTION) }
     var showHelp by remember { mutableStateOf(false) }
