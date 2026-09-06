@@ -126,6 +126,7 @@ private fun MiitApp() {
     var automaticKeyIndex by remember { mutableStateOf(0) }
     var editingDisplay by remember { mutableStateOf<BandDisplay?>(null) }
     var savedProject by remember { mutableStateOf<java.io.File?>(null) }
+    var savedProjectsRefresh by remember { mutableStateOf(0) }
     var savedProject by remember { mutableStateOf<java.io.File?>(null) }
     var savedProjectsVersion by remember { mutableStateOf(0) }
     var screen by remember { mutableStateOf(if (devices.any { it.authenticated }) MiitScreen.BAND else MiitScreen.CONNECTION) }
@@ -353,9 +354,9 @@ private fun BandScreen(
     band: BandDevice,
     onEdit: (BandDisplay) -> Unit,
     onNew: () -> Unit,
-    savedProjects: List<java.io.File>,
-    onOpenSaved: (java.io.File) -> Unit,
-    onSavedDeleted: () -> Unit
+    savedProjects: List<java.io.File> = emptyList(),
+    onOpenSaved: (java.io.File) -> Unit = {},
+    onDeleteSaved: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val runtimeInfo = buildString {
@@ -369,53 +370,43 @@ private fun BandScreen(
         LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { Text(runtimeInfo.ifBlank { "Connected • reading Band information…" }, color = Color.Gray, fontSize = 13.sp) }
             item { Text("Watch faces", style = MaterialTheme.typography.titleLarge) }
-            if (band.watchfaces.isEmpty()) {
-                item { Text("No watch-face entries received yet.", color = Color.Gray, fontSize = 13.sp) }
-            } else {
-                items(band.watchfaces, key = { it.stableId }) { face ->
-                    var previewPath by remember(face.stableId) { mutableStateOf(face.previewPath) }
-                    LaunchedEffect(face.stableId) {
-                        if (previewPath == null) previewPath = withContext(Dispatchers.IO) { WatchfacePreviewResolver.find(context, face, band.model)?.file?.absolutePath }
-                    }
-                    Card(Modifier.fillMaxWidth()) {
-                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            PreviewThumb(previewPath)
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                Text(face.name ?: face.code ?: "Unnamed watch face")
-                                face.code?.let { Text(it, color = Color.Gray, fontSize = 10.sp) }
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    OutlinedButton(onClick = { onEdit(face.copy(previewPath = previewPath)) }) { Text("Edit") }
-                                    OutlinedButton(onClick = {
-                                        val q = Uri.encode((face.name ?: face.code ?: band.name) + " Xiaomi Smart Band watch face")
-                                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=$q"))) }
-                                    }) { Text("Online") }
-                                }
+            if (band.watchfaces.isEmpty()) item { Text("No watch-face entries received yet.", color = Color.Gray, fontSize = 13.sp) }
+            else items(band.watchfaces, key = { it.stableId }) { face ->
+                var previewPath by remember(face.stableId) { mutableStateOf(face.previewPath) }
+                LaunchedEffect(face.stableId) { if (previewPath == null) previewPath = withContext(Dispatchers.IO) { WatchfacePreviewResolver.find(context, face, band.model)?.file?.absolutePath } }
+                Card(Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        PreviewThumb(previewPath)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text(face.name ?: face.code ?: "Unnamed watch face")
+                            face.code?.let { Text(it, color = Color.Gray, fontSize = 10.sp) }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton(onClick = { onEdit(face.copy(previewPath = previewPath)) }) { Text("Edit") }
+                                OutlinedButton(onClick = {
+                                    val q = Uri.encode((face.name ?: face.code ?: band.name) + " Xiaomi Smart Band watch face")
+                                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=$q"))) }
+                                }) { Text("Online") }
                             }
                         }
                     }
                 }
             }
-            item { Text("Saved designs", style = MaterialTheme.typography.titleLarge) }
-            if (savedProjects.isEmpty()) {
-                item { Text("Your saved designs will appear here.", color = Color.Gray, fontSize = 13.sp) }
-            } else {
-                items(savedProjects, key = { it.absolutePath + it.lastModified() }) { file ->
-                    val name = WatchfaceProjectStore.readName(file)
-                    val target = WatchfaceProjectStore.readTarget(file)
-                    Card(Modifier.fillMaxWidth()) {
-                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.width(68.dp).height(106.dp).background(Color.Black, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
-                                Text("${target.first}×${target.second}", color = Color.Gray, fontSize = 9.sp)
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                Text(name)
-                                Text("${target.first} × ${target.second} px", color = Color.Gray, fontSize = 9.sp)
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    OutlinedButton(onClick = { onOpenSaved(file) }) { Text("Open") }
-                                    OutlinedButton(onClick = { if (file.delete()) onSavedDeleted() }) { Text("Delete") }
-                                }
+            item { HorizontalDivider(); Text("Saved designs", style = MaterialTheme.typography.titleLarge) }
+            if (savedProjects.isEmpty()) item { Text("Your saved designs will appear here.", color = Color.Gray, fontSize = 13.sp) }
+            else items(savedProjects, key = { it.absolutePath + it.lastModified() }) { file ->
+                val name = WatchfaceProjectStore.readName(file)
+                val target = WatchfaceProjectStore.readTarget(file)
+                Card(Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.width(68.dp).height(106.dp).background(Color.Black, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Text("${target.first}×${target.second}", color = Color.Gray, fontSize = 9.sp) }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text(name)
+                            Text("${target.first} × ${target.second} px", color = Color.Gray, fontSize = 9.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton(onClick = { onOpenSaved(file) }) { Text("Open") }
+                                OutlinedButton(onClick = { if (file.delete()) onDeleteSaved() }) { Text("Delete") }
                             }
                         }
                     }
