@@ -126,6 +126,7 @@ private fun MiitApp() {
     var automaticKeyIndex by remember { mutableStateOf(0) }
     var editingDisplay by remember { mutableStateOf<BandDisplay?>(null) }
     var savedProject by remember { mutableStateOf<java.io.File?>(null) }
+    var savedProjectsRefresh by remember { mutableStateOf(0) }
     var screen by remember { mutableStateOf(if (devices.any { it.authenticated }) MiitScreen.BAND else MiitScreen.CONNECTION) }
     var showHelp by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -240,9 +241,9 @@ private fun MiitApp() {
                     band = band,
                     onEdit = { display -> editingDisplay = display; savedProject = null; screen = MiitScreen.EDITOR },
                     onNew = { editingDisplay = null; savedProject = null; screen = MiitScreen.EDITOR },
-                    savedProjects = WatchfaceProjectStore.list(context),
+                    savedProjects = remember(savedProjectsRefresh) { WatchfaceProjectStore.list(context) },
                     onOpenSaved = { file -> savedProject = file; editingDisplay = null; screen = MiitScreen.EDITOR },
-                    onDeleteSaved = { savedProjectsVersion++ }
+                    onDeleteSaved = { savedProjectsRefresh++ }
                 )
             }
             MiitScreen.EDITOR -> MiitWatchFaceEditor(
