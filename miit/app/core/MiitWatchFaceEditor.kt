@@ -764,9 +764,12 @@ private fun WatchCanvasV2(
                     val y = (element.y / 100f * ((190f * profile.height / profile.width) - 10f)).dp
                     when (element.type) {
                         EditorElementType.IMAGE -> EditorImageLayer(element, x, y, element.id == selectedId, onSelect, onMove)
-                        EditorElementType.CIRCLE, EditorElementType.RECTANGLE, EditorElementType.LINE, EditorElementType.ARC ->
+                        EditorElementType.CIRCLE, EditorElementType.RECTANGLE, EditorElementType.ROUNDED_RECTANGLE,
+                        EditorElementType.ELLIPSE, EditorElementType.TRIANGLE, EditorElementType.LINE, EditorElementType.ARC ->
                             EditorShapeLayer(element, x, y, element.id == selectedId, onSelect, onMove)
                         EditorElementType.ANALOG_CLOCK -> EditorAnalogLayer(element, x, y, element.id == selectedId, onSelect)
+                        EditorElementType.ANALOG_HAND -> EditorAnalogHandLayer(element, x, y, element.id == selectedId, onSelect, onMove)
+                        EditorElementType.CLOCK_FACE -> EditorClockFaceLayer(element, x, y, element.id == selectedId, onSelect, onMove)
                         EditorElementType.ARC_PROGRESS, EditorElementType.LINE_PROGRESS -> EditorProgressLayer(element, x, y, device)
                         EditorElementType.CONTAINER -> Box(
                             Modifier.padding(start = x, top = y)
@@ -864,7 +867,67 @@ private fun EditorShapeLayer(
 ) {
     Canvas(
         Modifier.padding(start = x, top = y)
-            .size(76.dp, 55.dp)
+            .size(82.dp, 62.dp)
+            .pointerInput(element.id) {
+                detectDragGestures(
+                    onDragStart = { onSelect(element.id) },
+                    onDrag = { change, amount ->
+                        change.consume()
+                        onMove(element.id, amount.x / 1.66f, amount.y / 4.08f)
+                    }
+                )
+            }
+    ) {
+        val stroke = Stroke(element.thickness.coerceAtLeast(0.5f).dp.toPx())
+        val fill = element.filled
+        when (element.type) {
+            EditorElementType.CIRCLE -> if (fill) drawCircle(element.color) else drawCircle(element.color, style = stroke)
+            EditorElementType.ELLIPSE -> {
+                if (fill) drawOval(element.color) else drawOval(element.color, style = stroke)
+            }
+            EditorElementType.RECTANGLE -> {
+                if (fill) drawRect(element.color) else drawRect(element.color, style = stroke)
+            }
+            EditorElementType.ROUNDED_RECTANGLE -> {
+                val r = element.cornerRadius.coerceAtLeast(2f).dp.toPx()
+                if (fill) drawRoundRect(color = element.color, cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r))
+                else drawRoundRect(color = element.color, cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r), style = stroke)
+            }
+            EditorElementType.TRIANGLE -> {
+                val path = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(size.width / 2f, 0f)
+                    lineTo(size.width, size.height)
+                    lineTo(0f, size.height)
+                    close()
+                }
+                if (fill) drawPath(path, color = element.color) else drawPath(path, color = element.color, style = stroke)
+            }
+            EditorElementType.LINE -> drawLine(
+                element.color,
+                Offset(0f, size.height / 2f),
+                Offset(size.width, size.height / 2f),
+                strokeWidth = element.thickness.coerceAtLeast(0.5f).dp.toPx(),
+                cap = StrokeCap.Round
+            )
+            EditorElementType.ARC -> drawArc(element.color, element.rotation - 90f, 270f, false, style = stroke)
+            else -> Unit
+        }
+        if (selected) drawRect(Color(0x663F78FF), style = Stroke(1.dp.toPx()))
+    }
+}
+
+
+@Composable
+private fun EditorClockFaceLayer(
+    element: EditorElement,
+    x: Dp,
+    y: Dp,
+    selected: Boolean,
+    onSelect: (Int) -> Unit,
+    onMove: (Int, Float, Float) -> Unit
+) {
+    Canvas(
+        Modifier.padding(start = x, top = y).size(element.width.dp, element.height.dp)
             .pointerInput(element.id) {
                 detectDragGestures { change, amount ->
                     change.consume()
@@ -873,15 +936,48 @@ private fun EditorShapeLayer(
                 }
             }
     ) {
-        val stroke = Stroke(2.dp.toPx())
-        when (element.type) {
-            EditorElementType.CIRCLE -> drawCircle(element.color, style = stroke)
-            EditorElementType.RECTANGLE -> drawRect(element.color, style = stroke)
-            EditorElementType.LINE -> drawLine(element.color, Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-            EditorElementType.ARC -> drawArc(element.color, -90f, 270f, false, style = stroke)
-            else -> Unit
+        drawCircle(element.color, style = Stroke(element.thickness.dp.toPx()))
+        if (selected) drawCircle(Color(0xFF3F78FF), style = Stroke(1.dp.toPx()))
+    }
+}
+
+@Composable
+private fun EditorAnalogHandLayer(
+    element: EditorElement,
+    x: Dp,
+    y: Dp,
+    selected: Boolean,
+    onSelect: (Int) -> Unit,
+    onMove: (Int, Float, Float) -> Unit
+) {
+    val now = java.util.Calendar.getInstance()
+    val h = now.get(java.util.Calendar.HOUR)
+    val m = now.get(java.util.Calendar.MINUTE)
+    val s = now.get(java.util.Calendar.SECOND)
+    val angle = when (element.handKind) {
+        "Hour" -> h / 12f * 360f + m / 60f * 30f
+        "Minute" -> m / 60f * 360f
+        else -> s / 60f * 360f
+    } + element.rotation - 90f
+    Canvas(
+        Modifier.padding(start = x, top = y).size(150.dp).pointerInput(element.id) {
+            detectDragGestures(
+                onDragStart = { onSelect(element.id) },
+                onDrag = { change, amount ->
+                    change.consume()
+                    onMove(element.id, amount.x / 1.66f, amount.y / 4.08f)
+                }
+            )
         }
-        if (selected) drawRect(Color(0x663F78FF), style = Stroke(1.dp.toPx()))
+    ) {
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        val length = element.length / 100f * size.minDimension / 2f
+        val radians = Math.toRadians(angle.toDouble())
+        val ex = cx + kotlin.math.cos(radians).toFloat() * length
+        val ey = cy + kotlin.math.sin(radians).toFloat() * length
+        drawLine(element.color, Offset(cx, cy), Offset(ex, ey), element.thickness.coerceAtLeast(0.5f).dp.toPx(), cap = StrokeCap.Round)
+        if (selected) drawCircle(Color(0xFF3F78FF), 4.dp.toPx(), Offset(cx, cy))
     }
 }
 
