@@ -82,7 +82,7 @@ private enum class EditorElementType {
     LINE_PROGRESS, CONTAINER, TEXT, CIRCLE, RECTANGLE, LINE, ARC, IMAGE
 }
 
-private data class EditorElement(
+internal data class EditorElement(
     val id: Int,
     val type: EditorElementType,
     val preview: String,
