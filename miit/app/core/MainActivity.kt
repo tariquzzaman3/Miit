@@ -125,6 +125,8 @@ private fun MiitApp() {
     var automaticConnection by remember { mutableStateOf(false) }
     var automaticKeyIndex by remember { mutableStateOf(0) }
     var editingDisplay by remember { mutableStateOf<BandDisplay?>(null) }
+    var savedProject by remember { mutableStateOf<java.io.File?>(null) }
+    var savedProjectsVersion by remember { mutableStateOf(0) }
     var screen by remember { mutableStateOf(if (devices.any { it.authenticated }) MiitScreen.BAND else MiitScreen.CONNECTION) }
     var showHelp by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -237,12 +239,16 @@ private fun MiitApp() {
             MiitScreen.BAND -> connectedBand?.let { band ->
                 BandScreen(
                     band = band,
-                    onEdit = { display -> editingDisplay = display; screen = MiitScreen.EDITOR },
-                    onNew = { editingDisplay = null; screen = MiitScreen.EDITOR }
+                    onEdit = { display -> editingDisplay = display; savedProject = null; screen = MiitScreen.EDITOR },
+                    onNew = { editingDisplay = null; savedProject = null; screen = MiitScreen.EDITOR },
+                    savedProjects = WatchfaceProjectStore.list(context),
+                    onOpenSaved = { file -> savedProject = file; editingDisplay = null; screen = MiitScreen.EDITOR },
+                    onSavedDeleted = { savedProjectsVersion++ }
                 )
             }
             MiitScreen.EDITOR -> MiitWatchFaceEditor(
                 display = editingDisplay,
+                savedProject = savedProject,
                 device = connectedBand,
                 onBack = { screen = MiitScreen.BAND },
                 onAction = { action ->
@@ -340,14 +346,17 @@ private fun ConnectionScreen(
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BandScreen(
     band: BandDevice,
     onEdit: (BandDisplay) -> Unit,
-    onNew: () -> Unit
+    onNew: () -> Unit,
+    savedProjects: List<java.io.File>,
+    onOpenSaved: (java.io.File) -> Unit,
+    onSavedDeleted: () -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val runtimeInfo = buildString {
         band.batteryPercentage?.let { append("🔋 ").append(it).append("%") }
         if (band.charging == true) append(" • ⚡")
@@ -355,59 +364,30 @@ private fun BandScreen(
         band.firmware?.let { append(" • ").append(it) }
         band.countryVariant?.takeIf { it.isNotBlank() }?.let { append(" • ").append(it) }
     }
-
     Scaffold(topBar = { TopAppBar(title = { Text(band.name) }) }) { padding ->
-        LazyColumn(
-            Modifier.fillMaxSize().padding(padding).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            item {
-                Text(
-                    runtimeInfo.ifBlank { "Connected • reading Band information…" },
-                    color = Color.Gray,
-                    fontSize = 13.sp
-                )
-            }
+        LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item { Text(runtimeInfo.ifBlank { "Connected • reading Band information…" }, color = Color.Gray, fontSize = 13.sp) }
             item { Text("Watch faces", style = MaterialTheme.typography.titleLarge) }
-
             if (band.watchfaces.isEmpty()) {
-                item {
-                    Text(
-                        "No watch-face entries received yet.",
-                        color = Color.Gray,
-                        fontSize = 13.sp
-                    )
-                }
+                item { Text("No watch-face entries received yet.", color = Color.Gray, fontSize = 13.sp) }
             } else {
                 items(band.watchfaces, key = { it.stableId }) { face ->
-                    var previewPath by remember(face.stableId) {
-                        mutableStateOf(face.previewPath)
-                    }
+                    var previewPath by remember(face.stableId) { mutableStateOf(face.previewPath) }
                     LaunchedEffect(face.stableId) {
-                        if (previewPath == null) {
-                            previewPath = withContext(Dispatchers.IO) {
-                                WatchfacePreviewResolver.find(context, face, band.model)?.file?.absolutePath
-                            }
-                        }
+                        if (previewPath == null) previewPath = withContext(Dispatchers.IO) { WatchfacePreviewResolver.find(context, face, band.model)?.file?.absolutePath }
                     }
                     Card(Modifier.fillMaxWidth()) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             PreviewThumb(previewPath)
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                 Text(face.name ?: face.code ?: "Unnamed watch face")
                                 face.code?.let { Text(it, color = Color.Gray, fontSize = 10.sp) }
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    OutlinedButton(onClick = { onEdit(face.copy(previewPath = previewPath)) }) { Text("Edit") }
                                     OutlinedButton(onClick = {
-                                        onEdit(face.copy(previewPath = previewPath))
-                                    }) { Text("Edit") }
-                                    OutlinedButton(onClick = {
-                                        val query = Uri.encode((face.name ?: face.code ?: band.name) + " Xiaomi Smart Band watch face")
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=$query"))
-                                        runCatching { context.startActivity(intent) }
+                                        val q = Uri.encode((face.name ?: face.code ?: band.name) + " Xiaomi Smart Band watch face")
+                                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=$q"))) }
                                     }) { Text("Online") }
                                 }
                             }
@@ -415,12 +395,32 @@ private fun BandScreen(
                     }
                 }
             }
-
-            item {
-                Button(onClick = onNew, Modifier.fillMaxWidth()) {
-                    Text("＋ Custom display")
+            item { Text("Saved designs", style = MaterialTheme.typography.titleLarge) }
+            if (savedProjects.isEmpty()) {
+                item { Text("Your saved designs will appear here.", color = Color.Gray, fontSize = 13.sp) }
+            } else {
+                items(savedProjects, key = { it.absolutePath + it.lastModified() }) { file ->
+                    val name = WatchfaceProjectStore.readName(file)
+                    val target = WatchfaceProjectStore.readTarget(file)
+                    Card(Modifier.fillMaxWidth()) {
+                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.width(68.dp).height(106.dp).background(Color.Black, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+                                Text("${target.first}×${target.second}", color = Color.Gray, fontSize = 9.sp)
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Text(name)
+                                Text("${target.first} × ${target.second} px", color = Color.Gray, fontSize = 9.sp)
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    OutlinedButton(onClick = { onOpenSaved(file) }) { Text("Open") }
+                                    OutlinedButton(onClick = { if (file.delete()) onSavedDeleted() }) { Text("Delete") }
+                                }
+                            }
+                        }
+                    }
                 }
             }
+            item { Button(onClick = onNew, Modifier.fillMaxWidth()) { Text("＋ Custom display") } }
         }
     }
 }
