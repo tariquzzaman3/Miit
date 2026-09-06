@@ -274,8 +274,18 @@ private fun MiitApp() {
                     }
                 }
             )
-        }
-            MiitScreen.SETTINGS -> MiitSettingsScreen(themeMode, { themeMode = it; MiitSettingsStore.setTheme(context, it) }, MiitSettingsStore.aiProvider(context), { MiitSettingsStore.setAiProvider(context, it) }, MiitSettingsStore.aiApiKey(context), { MiitSettingsStore.setAiApiKey(context, it) }, { screen = MiitScreen.BAND }, { openExternal(context, "https://github.com/tariquzzaman3/Miit") }, { openExternal(context, "https://github.com/tariquzzaman3/Miit") }, { openExternal(context, "https://github.com/tariquzzaman3/Miit/releases/latest") })
+            MiitScreen.SETTINGS -> MiitSettingsScreen(
+                themeMode = themeMode,
+                onThemeChange = { themeMode = it; MiitSettingsStore.setTheme(context, it) },
+                aiProvider = MiitSettingsStore.aiProvider(context),
+                onAiProviderChange = { MiitSettingsStore.setAiProvider(context, it) },
+                aiApiKey = MiitSettingsStore.aiApiKey(context),
+                onAiApiKeyChange = { MiitSettingsStore.setAiApiKey(context, it) },
+                onBack = { screen = MiitScreen.BAND },
+                onGithub = { openExternal(context, "https://github.com/tariquzzaman3/Miit") },
+                onDocs = { openExternal(context, "https://github.com/tariquzzaman3/Miit") },
+                onRelease = { openExternal(context, "https://github.com/tariquzzaman3/Miit/releases/latest") }
+            )
         FloatingActionButton(
             onClick = {
                 val text = MiitTestLog.text(context)
@@ -483,4 +493,9 @@ private fun AuthKeyCandidatesDialog(
             Text("The complete key is hidden here.", color = Color.Gray, fontSize = 11.sp)
         }
     }, confirmButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } })
+}
+
+
+private fun openExternal(context: Context, url: String) {
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
 }
