@@ -75,7 +75,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private enum class MiitScreen { CONNECTION, BAND, EDITOR }
+private enum class MiitScreen { CONNECTION, BAND, EDITOR, SETTINGS }
 
 class MainActivity : ComponentActivity() {
     private val permissionLauncher = registerForActivityResult(
@@ -127,6 +127,7 @@ private fun MiitApp() {
     var editingDisplay by remember { mutableStateOf<BandDisplay?>(null) }
     var savedProject by remember { mutableStateOf<java.io.File?>(null) }
     var savedProjectsRefresh by remember { mutableStateOf(0) }
+    var themeMode by remember { mutableStateOf(MiitSettingsStore.theme(context)) }
     var screen by remember { mutableStateOf(if (devices.any { it.authenticated }) MiitScreen.BAND else MiitScreen.CONNECTION) }
     var showHelp by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -243,7 +244,8 @@ private fun MiitApp() {
                     onNew = { editingDisplay = null; savedProject = null; screen = MiitScreen.EDITOR },
                     savedProjects = remember(savedProjectsRefresh) { WatchfaceProjectStore.list(context) },
                     onOpenSaved = { file -> savedProject = file; editingDisplay = null; screen = MiitScreen.EDITOR },
-                    onDeleteSaved = { savedProjectsRefresh++ }
+                    onDeleteSaved = { savedProjectsRefresh++ },
+                    onSettings = { screen = MiitScreen.SETTINGS }
                 )
             }
             MiitScreen.EDITOR -> MiitWatchFaceEditor(
@@ -260,6 +262,7 @@ private fun MiitApp() {
                 }
             )
         }
+            MiitScreen.SETTINGS -> MiitSettingsScreen(themeMode, { themeMode = it; MiitSettingsStore.setTheme(context, it) }, { screen = MiitScreen.BAND })
         FloatingActionButton(
             onClick = {
                 val text = MiitTestLog.text(context)
@@ -353,7 +356,8 @@ private fun BandScreen(
     onNew: () -> Unit,
     savedProjects: List<java.io.File> = emptyList(),
     onOpenSaved: (java.io.File) -> Unit = {},
-    onDeleteSaved: () -> Unit = {}
+    onDeleteSaved: () -> Unit = {},
+    onSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val runtimeInfo = buildString {
@@ -363,7 +367,7 @@ private fun BandScreen(
         band.firmware?.let { append(" • ").append(it) }
         band.countryVariant?.takeIf { it.isNotBlank() }?.let { append(" • ").append(it) }
     }
-    Scaffold(topBar = { TopAppBar(title = { Text(band.name) }) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text(band.name) }, actions = { IconButton(onClick = onSettings) { Text("⚙") } }) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { Text(runtimeInfo.ifBlank { "Connected • reading Band information…" }, color = Color.Gray, fontSize = 13.sp) }
             item { Text("Watch faces", style = MaterialTheme.typography.titleLarge) }
