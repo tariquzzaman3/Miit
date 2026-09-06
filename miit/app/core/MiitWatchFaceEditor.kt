@@ -111,11 +111,14 @@ fun MiitWatchFaceEditor(
         mutableStateListOf<EditorElement>().apply {
             if (savedProject != null) {
                 addAll(SavedWatchfaceLoader.load(savedProject))
-            } else if (display == null) {
+            } else {
                 add(EditorElement(1, EditorElementType.TIME, "", 50f, 34f, 40f, format = "HH:mm"))
                 add(EditorElement(2, EditorElementType.DATE, "", 50f, 50f, 17f, format = "DD MMM"))
                 if (device?.batteryPercentage != null) {
                     add(EditorElement(3, EditorElementType.BATTERY, "", 50f, 63f, 16f))
+                }
+                if (device?.heartRate != null) {
+                    add(EditorElement(4, EditorElementType.HEART_RATE, "", 50f, 72f, 16f))
                 }
             }
         }
