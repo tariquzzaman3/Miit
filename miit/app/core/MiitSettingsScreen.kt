@@ -139,7 +139,7 @@ fun MiitSettingsScreen(
                         val message = result.fold({ if (it.tag == "0.1.0") "MIIT is up to date (${it.tag})." else "Update available: ${it.tag}." }, { "Update check failed." })
                         android.os.Handler(android.os.Looper.getMainLooper()).post {
                             updateText = message
-                            result.getOrNull()?.let { if (it.tag != BuildConfig.VERSION_NAME) onRelease() }
+                            result.getOrNull()?.let { if (it.tag != "0.1.0") onRelease() }
                         }
                     }.start()
                 }, Modifier.fillMaxWidth()) { Text("Check for updates") }
@@ -147,7 +147,7 @@ fun MiitSettingsScreen(
             }
             item {
                 Text("About", style = MaterialTheme.typography.titleLarge)
-                Text("MIIT ${BuildConfig.VERSION_NAME}", color = Color.Gray)
+                Text("MIIT ${"0.1.0"}", color = Color.Gray)
                 Text("Xiaomi Band watch-face editor and connection tools.", color = Color.Gray, fontSize = 12.sp)
             }
         }
