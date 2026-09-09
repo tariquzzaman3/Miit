@@ -409,11 +409,16 @@ fun MiitWatchFaceEditor(
             onSourcePicker = { sourcePicker = true },
             onExport = {
                 runCatching {
-                    exportFile = MiitWatchfaceExporter.exportBundle(
+                    val projectDir = MiitWatchfaceExporter.exportMiCreateProject(
                         context,
                         profile,
                         elements.toList(),
                         device,
+                        display?.name ?: "MIIT watch face"
+                    )
+                    exportFile = MiitWatchfaceExporter.zipMiCreateProject(
+                        context,
+                        projectDir,
                         display?.name ?: "MIIT watch face"
                     )
                     exportPicker.launch(exportFile!!.name)
