@@ -123,6 +123,21 @@ object MiitWatchfaceExporter {
         return bitmap
     }
 
+    fun zipMiCreateProject(context: Context, projectDir: File, name: String): File {
+        val root = File(context.filesDir, "watchface_exports").apply { mkdirs() }
+        val safe = name.replace(Regex("[^A-Za-z0-9._-]+"), "_").ifBlank { "miit_watchface" }
+        val zipFile = File(root, safe + "-micreate.fprj.zip")
+        ZipOutputStream(FileOutputStream(zipFile)).use { zip ->
+            projectDir.walkTopDown().filter { it.isFile }.forEach { file ->
+                val relative = file.relativeTo(projectDir).path.replace(File.separatorChar, '/')
+                zip.putNextEntry(ZipEntry(safe + "/" + relative))
+                file.inputStream().use { it.copyTo(zip) }
+                zip.closeEntry()
+            }
+        }
+        return zipFile
+    }
+
     fun exportBundle(context: Context, profile: DeviceProfile, elements: List<EditorElement>, device: BandDevice?, name: String): File {
         val validation = validate(profile, elements)
         require(validation.ok) { validation.errors.joinToString("\n") }
