@@ -7,6 +7,7 @@ import android.content.ContentValues
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.widget.Toast
+import java.io.File
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -241,7 +242,7 @@ fun MiitWatchFaceEditor(
                             showValidation = false
                             runCatching {
                                 exportFile = MiitWatchfaceExporter.exportBundle(context, profile, elements.toList(), device, display?.name ?: "MIIT watch face")
-                                exportPicker.launch(exportFile!!.name)
+                                exportPicker.launch(exportFile.name)
                             }.onFailure { Toast.makeText(context, it.message ?: "Export failed.", Toast.LENGTH_LONG).show() }
                         }) { Text("Export ZIP") }
                     }
