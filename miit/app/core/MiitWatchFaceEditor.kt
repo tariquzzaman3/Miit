@@ -142,9 +142,25 @@ fun MiitWatchFaceEditor(
     var referencePath by remember(display?.stableId) { mutableStateOf(display?.previewPath) }
     var layersOpen by remember { mutableStateOf(false) }
     var referenceOpacity by remember { mutableStateOf(0.65f) }
+    var exportFile by remember { mutableStateOf<File?>(null) }
     var propertiesOpen by remember { mutableStateOf(false) }
     var undoStack by remember { mutableStateOf<List<List<EditorElement>>>(emptyList()) }
     var redoStack by remember { mutableStateOf<List<List<EditorElement>>>(emptyList()) }
+
+    val exportPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        val source = exportFile
+        if (uri != null && source != null) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    source.inputStream().use { input -> input.copyTo(output) }
+                } ?: error("Unable to open selected destination.")
+                Toast.makeText(context, "Watch-face bundle exported.", Toast.LENGTH_SHORT).show()
+            }.onFailure {
+                Toast.makeText(context, it.message ?: "Export failed.", Toast.LENGTH_LONG).show()
+            }
+        }
+        exportFile = null
+    }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null && imageTarget != 0) {
@@ -360,7 +376,20 @@ fun MiitWatchFaceEditor(
                 if (elements.firstOrNull { it.id == selectedId }?.type == EditorElementType.TEXT) editingTextId = selectedId
             },
             onSourcePicker = { sourcePicker = true },
-            onExport = { onAction("export") },
+            onExport = {
+                runCatching {
+                    exportFile = MiitWatchfaceExporter.exportBundle(
+                        context,
+                        profile,
+                        elements.toList(),
+                        device,
+                        display?.name ?: "MIIT watch face"
+                    )
+                    exportPicker.launch(exportFile!!.name)
+                }.onFailure {
+                    Toast.makeText(context, it.message ?: "Export validation failed.", Toast.LENGTH_LONG).show()
+                }
+            },
             onBand = { onAction("band") },
             onAi = {
                 val visible = elements.filter { it.visible }
