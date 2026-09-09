@@ -27,7 +27,7 @@ data class WatchfaceValidation(
 )
 
 object MiitWatchfaceExporter {
-    fun validate(profile: DeviceProfile, elements: List<EditorElement>): WatchfaceValidation {
+    internal fun validate(profile: DeviceProfile, elements: List<EditorElement>): WatchfaceValidation {
         val errors = mutableListOf<String>()
         val warnings = mutableListOf<String>()
         if (profile.width <= 0 || profile.height <= 0) errors += "Invalid Band canvas size."
@@ -45,7 +45,7 @@ object MiitWatchfaceExporter {
         return WatchfaceValidation(errors.isEmpty(), errors, warnings)
     }
 
-    fun renderPreview(profile: DeviceProfile, elements: List<EditorElement>, device: BandDevice?): Bitmap {
+    internal fun renderPreview(profile: DeviceProfile, elements: List<EditorElement>, device: BandDevice?): Bitmap {
         val bitmap = Bitmap.createBitmap(profile.width, profile.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(AndroidColor.BLACK)
@@ -123,7 +123,7 @@ object MiitWatchfaceExporter {
         return bitmap
     }
 
-    fun zipMiCreateProject(context: Context, projectDir: File, name: String): File {
+    internal fun zipMiCreateProject(context: Context, projectDir: File, name: String): File {
         val root = File(context.filesDir, "watchface_exports").apply { mkdirs() }
         val safe = name.replace(Regex("[^A-Za-z0-9._-]+"), "_").ifBlank { "miit_watchface" }
         val zipFile = File(root, safe + "-micreate.fprj.zip")
@@ -138,7 +138,7 @@ object MiitWatchfaceExporter {
         return zipFile
     }
 
-    fun exportBundle(context: Context, profile: DeviceProfile, elements: List<EditorElement>, device: BandDevice?, name: String): File {
+    internal fun exportBundle(context: Context, profile: DeviceProfile, elements: List<EditorElement>, device: BandDevice?, name: String): File {
         val validation = validate(profile, elements)
         require(validation.ok) { validation.errors.joinToString("\n") }
         val dir = File(context.filesDir, "watchface_exports").apply { mkdirs() }
@@ -163,7 +163,7 @@ object MiitWatchfaceExporter {
         return file
     }
 
-    fun exportMiCreateProject(
+    internal fun exportMiCreateProject(
         context: Context, profile: DeviceProfile, elements: List<EditorElement>, device: BandDevice?, name: String
     ): File {
         val validation = validate(profile, elements)
