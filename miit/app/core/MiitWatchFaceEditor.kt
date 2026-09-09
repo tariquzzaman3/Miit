@@ -7,7 +7,6 @@ import android.content.ContentValues
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.widget.Toast
-import java.io.File
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -242,7 +241,7 @@ fun MiitWatchFaceEditor(
                             showValidation = false
                             runCatching {
                                 exportFile = MiitWatchfaceExporter.exportBundle(context, profile, elements.toList(), device, display?.name ?: "MIIT watch face")
-                                exportFile?.let { exportPicker.launch(it.name) }
+                                exportPicker.launch(exportFile!!.name)
                             }.onFailure { Toast.makeText(context, it.message ?: "Export failed.", Toast.LENGTH_LONG).show() }
                         }) { Text("Export ZIP") }
                     }
@@ -409,7 +408,25 @@ fun MiitWatchFaceEditor(
             },
             onSourcePicker = { sourcePicker = true },
             onExport = {
-                    onBand = {
+                runCatching {
+                    val projectDir = MiitWatchfaceExporter.exportMiCreateProject(
+                        context,
+                        profile,
+                        elements.toList(),
+                        device,
+                        display?.name ?: "MIIT watch face"
+                    )
+                    exportFile = MiitWatchfaceExporter.zipMiCreateProject(
+                        context,
+                        projectDir,
+                        display?.name ?: "MIIT watch face"
+                    )
+                    exportPicker.launch(exportFile!!.name)
+                }.onFailure {
+                    Toast.makeText(context, it.message ?: "Export validation failed.", Toast.LENGTH_LONG).show()
+                }
+            },
+            onBand = {
                 val validation = MiitWatchfaceExporter.validate(profile, elements.toList())
                 if (!validation.ok) showValidation = true else Toast.makeText(context, "Native Band installation requires a compiled Xiaomi watch-face package.", Toast.LENGTH_LONG).show()
             },
