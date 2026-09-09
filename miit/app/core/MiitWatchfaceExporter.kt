@@ -148,6 +148,72 @@ object MiitWatchfaceExporter {
         return file
     }
 
+    fun exportMiCreateProject(
+        context: Context, profile: DeviceProfile, elements: List<EditorElement>, device: BandDevice?, name: String
+    ): File {
+        val validation = validate(profile, elements)
+        require(validation.ok) { validation.errors.joinToString("\\n") }
+        val root = File(context.filesDir, "watchface_exports").apply { mkdirs() }
+        val safe = name.replace(Regex("[^A-Za-z0-9._-]+"), "_").ifBlank { "miit_watchface" }
+        val projectDir = File(root, safe).apply { mkdirs(); File(this, "images").mkdirs(); File(this, "output").mkdirs() }
+        val deviceType = when {
+            profile.deviceId.contains("band_10", true) -> "466"
+            profile.deviceId.contains("band_9", true) -> "366"
+            profile.deviceId.contains("band_8", true) -> "9"
+            else -> "366"
+        }
+        File(projectDir, safe + ".fprj").writeText(MiCreateFprjWriter.write(deviceType, name, elements, profile.width, profile.height))
+        FileOutputStream(File(projectDir, "images/preview.png")).use { out -> renderPreview(profile, elements, device).compress(Bitmap.CompressFormat.PNG, 100, out) }
+        File(projectDir, "README.txt").writeText(
+            "MIIT / Mi-Create project export\\n" +
+            "Target: " + profile.width + "x" + profile.height + "\\n" +
+            "Device type: " + deviceType + "\\n\\n" +
+            "Open the .fprj project with Mi-Create v1.1.1 or another compatible FPRJ workflow.\\n" +
+            "MIIT does not bundle the external watch-face compiler.\\n"
+        )
+        return projectDir
+    }
+
+private object MiCreateFprjWriter {
+    fun write(deviceType: String, title: String, elements: List<EditorElement>, width: Int, height: Int): String = buildString {
+        append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\\n")
+        append("<FaceProject DeviceType=\"").append(xml(deviceType)).append("\" Id=\"0\">\\n")
+        append("  <Screen Title=\"").append(xml(title)).append("\" Bitmap=\"\">\\n")
+        elements.filter { it.visible }.forEachIndexed { index, e -> append(widget(index + 1, e, width, height)) }
+        append("  </Screen>\\n</FaceProject>\\n")
+    }
+
+    private fun widget(index: Int, e: EditorElement, width: Int, height: Int): String {
+        val name = "miit_$index"
+        val x = (e.x / 100f * width).toInt()
+        val y = (e.y / 100f * height).toInt()
+        val w = e.width.toInt().coerceAtLeast(1)
+        val h = e.height.toInt().coerceAtLeast(1)
+        return when (e.type) {
+            EditorElementType.DIGITAL_NUMBER, EditorElementType.TIME, EditorElementType.DATE, EditorElementType.WEEKDAY,
+            EditorElementType.BATTERY, EditorElementType.HEART_RATE, EditorElementType.SPO2, EditorElementType.STEPS,
+            EditorElementType.CALORIES, EditorElementType.DISTANCE, EditorElementType.SLEEP, EditorElementType.WEATHER ->
+                "<Widget Shape=\"32\" Name=\"$name\" BitmapList=\"\" X=\"$x\" Y=\"$y\" Width=\"$w\" Height=\"$h\" Alpha=\"255\" Visible_Src=\"0\" Digits=\"1\" Alignment=\"${alignment(e)}\" Value_Src=\"${sourceId(e)}\" Spacing=\"0\" Blanking=\"0\"/>\\n"
+            EditorElementType.ANALOG_CLOCK ->
+                "<Widget Shape=\"27\" Name=\"$name\" X=\"$x\" Y=\"$y\" Width=\"$w\" Height=\"$h\" Alpha=\"255\" Visible_Src=\"0\" HourHandCorrection_En=\"0\" MinuteHandCorrection_En=\"0\" Background_ImageName=\"\" BgImage_rotate_xc=\"0\" BgImage_rotate_yc=\"0\" HourHand_ImageName=\"\" HourImage_rotate_xc=\"0\" HourImage_rotate_yc=\"0\" MinuteHand_Image=\"\" MinuteImage_rotate_xc=\"0\" MinuteImage_rotate_yc=\"0\" SecondHand_Image=\"\" SecondImage_rotate_xc=\"0\" SecondImage_rotate_yc=\"0\"/>\\n"
+            EditorElementType.ARC, EditorElementType.ARC_PROGRESS ->
+                "<Widget Shape=\"42\" Name=\"$name\" X=\"${x - w / 2}\" Y=\"${y - h / 2}\" Width=\"$w\" Height=\"$h\" Alpha=\"255\" Visible_Src=\"0\" Rotate_xc=\"${w / 2}\" Rotate_yc=\"${h / 2}\" Radius=\"${minOf(w, h) / 2}\" Line_Width=\"${e.thickness.toInt().coerceAtLeast(1)}\" Butt_cap_ending_style_En=\"0\" StartAngle=\"${e.rotation.toInt()}\" EndAngle=\"${(e.rotation + 270f).toInt()}\" Range_Min=\"0\" Range_Max=\"100\" Range_MinStep=\"0\" Range_Step=\"0\" Background_ImageName=\"\" Foreground_ImageName=\"\" Range_Max_Src=\"0\" Range_Val_Src=\"${sourceId(e)}\"/>\\n"
+            EditorElementType.CONTAINER ->
+                "<Widget Shape=\"34\" Name=\"$name\" X=\"$x\" Y=\"$y\" Width=\"$w\" Height=\"$h\" Alpha=\"255\" Visible_Src=\"0\"/>\\n"
+            EditorElementType.IMAGE ->
+                "<Widget Shape=\"30\" Name=\"$name\" Bitmap=\"preview.png\" X=\"$x\" Y=\"$y\" Width=\"$w\" Height=\"$h\" Alpha=\"255\" Visible_Src=\"0\"/>\\n"
+            else -> ""
+        }
+    }
+
+    private fun sourceId(e: EditorElement): Int = when (e.preview) {
+        "Hour" -> 8; "Minute" -> 9; "Second" -> 10; "Day" -> 11; "Week" -> 12; "Month" -> 13; "Year" -> 14;
+        "Battery percent" -> 20; "Heart rate" -> 21; "Current step count" -> 23; "Active Calorie" -> 25;
+        "Sleep score" -> 29; "Weather temp (C)" -> 15; else -> 0
+    }
+    private fun alignment(e: EditorElement): Int = when (e.alignment) { "Left" -> 0; "Right" -> 2; else -> 1 }
+    private fun xml(v: String) = v.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;")
+}
     private fun drawAnalogClock(canvas: Canvas, x: Float, y: Float, element: EditorElement, scale: Float) {
         val now = java.util.Calendar.getInstance()
         val h = now.get(java.util.Calendar.HOUR)
