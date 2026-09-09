@@ -2,6 +2,8 @@ package com.miit.app
 
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.provider.MediaStore
+import android.content.ContentValues
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.widget.Toast
@@ -143,6 +145,7 @@ fun MiitWatchFaceEditor(
     var layersOpen by remember { mutableStateOf(false) }
     var referenceOpacity by remember { mutableStateOf(0.65f) }
     var exportFile by remember { mutableStateOf<File?>(null) }
+    var showValidation by remember { mutableStateOf(false) }
     var propertiesOpen by remember { mutableStateOf(false) }
     var undoStack by remember { mutableStateOf<List<List<EditorElement>>>(emptyList()) }
     var redoStack by remember { mutableStateOf<List<List<EditorElement>>>(emptyList()) }
@@ -218,6 +221,34 @@ fun MiitWatchFaceEditor(
         }
     }
 
+    if (showValidation) {
+        val validation = MiitWatchfaceExporter.validate(profile, elements.toList())
+        AlertDialog(
+            onDismissRequest = { showValidation = false },
+            title = { Text("Export check") },
+            text = {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    item { Text(if (validation.ok) "Ready for export" else "Fix these items first", color = if (validation.ok) Color.White else Color(0xFFFF7777)) }
+                    validation.errors.forEach { error -> item { Text("✕ " + error, color = Color(0xFFFF7777), fontSize = 10.sp) } }
+                    validation.warnings.forEach { warning -> item { Text("• " + warning, color = Color.Gray, fontSize = 10.sp) } }
+                }
+            },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TextButton(onClick = { showValidation = false }) { Text("Close") }
+                    if (validation.ok) {
+                        Button(onClick = {
+                            showValidation = false
+                            runCatching {
+                                exportFile = MiitWatchfaceExporter.exportBundle(context, profile, elements.toList(), device, display?.name ?: "MIIT watch face")
+                                exportPicker.launch(exportFile!!.name)
+                            }.onFailure { Toast.makeText(context, it.message ?: "Export failed.", Toast.LENGTH_LONG).show() }
+                        }) { Text("Export ZIP") }
+                    }
+                }
+            }
+        )
+    }
     if (sourcePicker) {
         MiCreateSourceDialog(
             onDismiss = { sourcePicker = false },
@@ -390,7 +421,10 @@ fun MiitWatchFaceEditor(
                     Toast.makeText(context, it.message ?: "Export validation failed.", Toast.LENGTH_LONG).show()
                 }
             },
-            onBand = { onAction("band") },
+            onBand = {
+                val validation = MiitWatchfaceExporter.validate(profile, elements.toList())
+                if (!validation.ok) showValidation = true else Toast.makeText(context, "Native Band installation requires a compiled Xiaomi watch-face package.", Toast.LENGTH_LONG).show()
+            },
             onAi = {
                 val visible = elements.filter { it.visible }
                 if (visible.isNotEmpty()) {
@@ -474,7 +508,7 @@ fun MiitWatchFaceEditor(
                 elements.removeAll { it.id == selectedId }
                 selectedId = elements.firstOrNull()?.id ?: 0
             },
-            onExport = { onAction("export") },
+            onExport = { showValidation = true },
             onBand = { onAction("band") },
             onProperties = { propertiesOpen = true }
         )
