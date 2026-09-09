@@ -1296,14 +1296,14 @@ private fun FullPreview(
     }
 }
 
-private data class DeviceProfile(val width: Int, val height: Int, val source: String)
+internal data class DeviceProfile(val width: Int, val height: Int, val source: String, val deviceId: String)
 
 private fun resolveProfile(device: BandDevice?): DeviceProfile {
     val model = (device?.model ?: device?.name ?: "").lowercase()
     return when {
-        "band 10" in model || "smart band 10" in model -> DeviceProfile(212, 520, "Xiaomi Smart Band 10")
-        "band 9" in model || "smart band 9" in model -> DeviceProfile(192, 490, "Xiaomi Smart Band 9")
-        else -> DeviceProfile(192, 490, "Runtime profile unavailable — verify target device")
+        "band 10" in model || "smart band 10" in model -> DeviceProfile(212, 520, "Xiaomi Smart Band 10", "xiaomi_band_10")
+        "band 9" in model || "smart band 9" in model -> DeviceProfile(192, 490, "Xiaomi Smart Band 9", "xiaomi_band_9")
+        else -> DeviceProfile(192, 490, "Runtime profile unavailable — verify target device", "xiaomi_band_9")
     }
 }
 
