@@ -237,10 +237,19 @@ fun MiitWatchFaceEditor(
             confirmButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     TextButton(onClick = { showValidation = false }) { Text("Close") }
-                    if (validation.ok) {
-                        Button(onClick = {
-                            showValidation = false
-                            runCatching {
+        if (uri != null) {
+            val source = exportFile
+            if (source != null) {
+                runCatching {
+                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                        source.inputStream().use { input -> input.copyTo(output) }
+                    } ?: error("Unable to open selected destination.")
+                    Toast.makeText(context, "Watch-face bundle exported.", Toast.LENGTH_SHORT).show()
+                }.onFailure {
+                    Toast.makeText(context, it.message ?: "Export failed.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
                                 exportFile = MiitWatchfaceExporter.exportBundle(context, profile, elements.toList(), device, display?.name ?: "MIIT watch face")
                                 exportPicker.launch(exportFile.name)
                             }.onFailure { Toast.makeText(context, it.message ?: "Export failed.", Toast.LENGTH_LONG).show() }
