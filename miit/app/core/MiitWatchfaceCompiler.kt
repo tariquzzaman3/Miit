@@ -21,7 +21,7 @@ object MiitWatchfaceCompiler {
         val elementCount: Int
     )
 
-    fun compile(
+    internal fun compile(
         target: Target,
         elements: List<EditorElement>
     ): Result {
