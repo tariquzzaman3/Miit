@@ -2,8 +2,6 @@ package com.miit.app
 
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.provider.MediaStore
-import android.content.ContentValues
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.widget.Toast
@@ -144,26 +142,9 @@ fun MiitWatchFaceEditor(
     var referencePath by remember(display?.stableId) { mutableStateOf(display?.previewPath) }
     var layersOpen by remember { mutableStateOf(false) }
     var referenceOpacity by remember { mutableStateOf(0.65f) }
-    var exportFile by remember { mutableStateOf<File?>(null) }
-    var showValidation by remember { mutableStateOf(false) }
     var propertiesOpen by remember { mutableStateOf(false) }
     var undoStack by remember { mutableStateOf<List<List<EditorElement>>>(emptyList()) }
     var redoStack by remember { mutableStateOf<List<List<EditorElement>>>(emptyList()) }
-
-    val exportPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
-        val source = exportFile
-        if (uri != null && source != null) {
-            runCatching {
-                context.contentResolver.openOutputStream(uri)?.use { output ->
-                    source.inputStream().use { input -> input.copyTo(output) }
-                } ?: error("Unable to open selected destination.")
-                Toast.makeText(context, "Watch-face bundle exported.", Toast.LENGTH_SHORT).show()
-            }.onFailure {
-                Toast.makeText(context, it.message ?: "Export failed.", Toast.LENGTH_LONG).show()
-            }
-        }
-        exportFile = null
-    }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null && imageTarget != 0) {
@@ -221,34 +202,6 @@ fun MiitWatchFaceEditor(
         }
     }
 
-    if (showValidation) {
-        val validation = MiitWatchfaceExporter.validate(profile, elements.toList())
-        AlertDialog(
-            onDismissRequest = { showValidation = false },
-            title = { Text("Export check") },
-            text = {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    item { Text(if (validation.ok) "Ready for export" else "Fix these items first", color = if (validation.ok) Color.White else Color(0xFFFF7777)) }
-                    validation.errors.forEach { error -> item { Text("✕ " + error, color = Color(0xFFFF7777), fontSize = 10.sp) } }
-                    validation.warnings.forEach { warning -> item { Text("• " + warning, color = Color.Gray, fontSize = 10.sp) } }
-                }
-            },
-            confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    TextButton(onClick = { showValidation = false }) { Text("Close") }
-                    if (validation.ok) {
-                        Button(onClick = {
-                            showValidation = false
-                            runCatching {
-                                exportFile = MiitWatchfaceExporter.exportBundle(context, profile, elements.toList(), device, display?.name ?: "MIIT watch face")
-                                exportPicker.launch(exportFile!!.name)
-                            }.onFailure { Toast.makeText(context, it.message ?: "Export failed.", Toast.LENGTH_LONG).show() }
-                        }) { Text("Export ZIP") }
-                    }
-                }
-            }
-        )
-    }
     if (sourcePicker) {
         MiCreateSourceDialog(
             onDismiss = { sourcePicker = false },
@@ -407,29 +360,8 @@ fun MiitWatchFaceEditor(
                 if (elements.firstOrNull { it.id == selectedId }?.type == EditorElementType.TEXT) editingTextId = selectedId
             },
             onSourcePicker = { sourcePicker = true },
-            onExport = {
-                runCatching {
-                    val projectDir = MiitWatchfaceExporter.exportMiCreateProject(
-                        context,
-                        profile,
-                        elements.toList(),
-                        device,
-                        display?.name ?: "MIIT watch face"
-                    )
-                    exportFile = MiitWatchfaceExporter.zipMiCreateProject(
-                        context,
-                        projectDir,
-                        display?.name ?: "MIIT watch face"
-                    )
-                    exportPicker.launch(exportFile!!.name)
-                }.onFailure {
-                    Toast.makeText(context, it.message ?: "Export validation failed.", Toast.LENGTH_LONG).show()
-                }
-            },
-            onBand = {
-                val validation = MiitWatchfaceExporter.validate(profile, elements.toList())
-                if (!validation.ok) showValidation = true else Toast.makeText(context, "Native Band installation requires a compiled Xiaomi watch-face package.", Toast.LENGTH_LONG).show()
-            },
+            onExport = { onAction("export") },
+            onBand = { onAction("band") },
             onAi = {
                 val visible = elements.filter { it.visible }
                 if (visible.isNotEmpty()) {
@@ -513,7 +445,7 @@ fun MiitWatchFaceEditor(
                 elements.removeAll { it.id == selectedId }
                 selectedId = elements.firstOrNull()?.id ?: 0
             },
-            onExport = { showValidation = true },
+            onExport = { onAction("export") },
             onBand = { onAction("band") },
             onProperties = { propertiesOpen = true }
         )
@@ -1296,14 +1228,14 @@ private fun FullPreview(
     }
 }
 
-internal data class DeviceProfile(val width: Int, val height: Int, val source: String, val deviceId: String)
+private data class DeviceProfile(val width: Int, val height: Int, val source: String)
 
 private fun resolveProfile(device: BandDevice?): DeviceProfile {
     val model = (device?.model ?: device?.name ?: "").lowercase()
     return when {
-        "band 10" in model || "smart band 10" in model -> DeviceProfile(212, 520, "Xiaomi Smart Band 10", "xiaomi_band_10")
-        "band 9" in model || "smart band 9" in model -> DeviceProfile(192, 490, "Xiaomi Smart Band 9", "xiaomi_band_9")
-        else -> DeviceProfile(192, 490, "Runtime profile unavailable — verify target device", "xiaomi_band_9")
+        "band 10" in model || "smart band 10" in model -> DeviceProfile(212, 520, "Xiaomi Smart Band 10")
+        "band 9" in model || "smart band 9" in model -> DeviceProfile(192, 490, "Xiaomi Smart Band 9")
+        else -> DeviceProfile(192, 490, "Runtime profile unavailable — verify target device")
     }
 }
 
