@@ -135,7 +135,7 @@ fun MiitWatchFaceEditor(
     var selectedId by remember { mutableIntStateOf(elements.firstOrNull()?.id ?: 0) }
     var selectedTool by remember { mutableStateOf(ToolCategory.ADD) }
     var previewMode by remember { mutableStateOf(false) }
-    var aodEnabled by remember { mutableStateOf(false) }
+    var aodEnabled by remember(savedProject?.absolutePath) { mutableStateOf(savedProject?.let { WatchfaceProjectStore.readAod(it) } ?: false) }
     var editingTextId by remember { mutableIntStateOf(0) }
     var sourcePicker by remember { mutableStateOf(false) }
     var imageTarget by remember { mutableIntStateOf(0) }
@@ -1241,7 +1241,22 @@ private fun resolveProfile(device: BandDevice?): DeviceProfile {
 
 private fun serializeElements(elements: List<EditorElement>): String =
     elements.joinToString(prefix = "[", postfix = "]") { e ->
-        "{\"id\":${e.id},\"type\":\"${e.type.name}\",\"preview\":\"${jsonEscape(e.preview)}\",\"x\":${e.x},\"y\":${e.y},\"size\":${e.size},\"color\":\"${e.color.value.toLong().toString(16)}\",\"bold\":${e.bold},\"alignment\":\"${jsonEscape(e.alignment)}\",\"format\":\"${jsonEscape(e.format)}\",\"handKind\":\"${jsonEscape(e.handKind)}\",\"length\":${e.length},\"thickness\":${e.thickness},\"rotation\":${e.rotation},\"filled\":${e.filled},\"cornerRadius\":${e.cornerRadius},\"visible\":${e.visible},\"locked\":${e.locked}}"
+        "{"
+            + "\"id\":${e.id},"
+            + "\"type\":\"${e.type.name}\","
+            + "\"preview\":\"${jsonEscape(e.preview)}\","
+            + "\"x\":${e.x},\"y\":${e.y},"
+            + "\"size\":${e.size},\"width\":${e.width},\"height\":${e.height},"
+            + "\"color\":\"${e.color.value.toString(16)}\","
+            + "\"bold\":${e.bold},"
+            + "\"alignment\":\"${jsonEscape(e.alignment)}\","
+            + "\"format\":\"${jsonEscape(e.format)}\","
+            + "\"handKind\":\"${jsonEscape(e.handKind)}\","
+            + "\"length\":${e.length},\"thickness\":${e.thickness},"
+            + "\"rotation\":${e.rotation},\"filled\":${e.filled},"
+            + "\"cornerRadius\":${e.cornerRadius},"
+            + "\"visible\":${e.visible},\"locked\":${e.locked}"
+            + "}"
     }
 
 private fun jsonEscape(value: String): String =
