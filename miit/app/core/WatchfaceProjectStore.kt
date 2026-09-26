@@ -5,6 +5,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
+/** Persistent MIIT editor projects. The filename is immutable; the project name is data. */
 object WatchfaceProjectStore {
     private const val DIR = "watchfaces"
 
@@ -16,22 +17,17 @@ object WatchfaceProjectStore {
         aod: Boolean,
         elementsJson: String
     ): File {
-        val displayName = name.trim().ifBlank { "MIIT watch face" }
-        val safeName = displayName
-            .replace(Regex("[^A-Za-z0-9._-]+"), "_")
-            .take(60)
-        val directory = context.filesDir.resolve(DIR).also { it.mkdirs() }
-        val file = File(directory, "$safeName-${UUID.randomUUID()}.miit.json")
-
-        val json = JSONObject()
-            .put("format", "miit-watchface-project")
-            .put("version", 2)
-            .put("id", UUID.randomUUID().toString())
-            .put("name", displayName)
-            .put("target", JSONObject().put("width", width).put("height", height))
-            .put("aod", aod)
-            .put("elements", org.json.JSONTokener(elementsJson).nextValue())
-
+        val directory = context.filesDir.resolve(DIR).apply { mkdirs() }
+        val file = directory.resolve(UUID.randomUUID().toString() + ".miit.json")
+        val json = JSONObject().apply {
+            put("format", "miit-watchface-project")
+            put("version", 2)
+            put("id", UUID.randomUUID().toString())
+            put("name", name.trim().ifBlank { "MIIT watch face" })
+            put("target", JSONObject().put("width", width).put("height", height))
+            put("aod", aod)
+            put("elements", org.json.JSONArray(elementsJson))
+        }
         file.writeText(json.toString(2))
         return file
     }
@@ -42,21 +38,19 @@ object WatchfaceProjectStore {
             ?.sortedByDescending { it.lastModified() }
             ?: emptyList()
 
-    private fun readJson(file: File): JSONObject? =
-        runCatching { JSONObject(file.readText()) }.getOrNull()
-
     fun readName(file: File): String =
-        readJson(file)?.optString("name")?.takeIf { it.isNotBlank() }
-            ?: file.nameWithoutExtension
+        runCatching { JSONObject(file.readText()).optString("name", file.nameWithoutExtension) }
+            .getOrDefault(file.nameWithoutExtension)
 
-    fun readTarget(file: File): Pair<Int, Int> {
-        val target = readJson(file)?.optJSONObject("target")
-        return Pair(target?.optInt("width", 0) ?: 0, target?.optInt("height", 0) ?: 0)
-    }
+    fun readTarget(file: File): Pair<Int, Int> =
+        runCatching {
+            val target = JSONObject(file.readText()).optJSONObject("target")
+            Pair(target?.optInt("width", 0) ?: 0, target?.optInt("height", 0) ?: 0)
+        }.getOrDefault(0 to 0)
 
     fun readElementsJson(file: File): String? =
-        readJson(file)?.optJSONArray("elements")?.toString()
+        runCatching { JSONObject(file.readText()).optJSONArray("elements")?.toString() }.getOrNull()
 
     fun readAod(file: File): Boolean =
-        readJson(file)?.optBoolean("aod", false) ?: false
+        runCatching { JSONObject(file.readText()).optBoolean("aod", false) }.getOrDefault(false)
 }
