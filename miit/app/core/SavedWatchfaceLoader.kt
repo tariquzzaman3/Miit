@@ -1,24 +1,27 @@
 package com.miit.app
 
-import androidx.compose.ui.graphics.Color
 import org.json.JSONArray
 import java.io.File
 
 internal object SavedWatchfaceLoader {
     internal fun load(file: File): List<EditorElement> {
         val raw = runCatching { file.readText() }.getOrNull() ?: return emptyList()
-        val start = raw.indexOf('[')
-        val end = raw.lastIndexOf(']')
-        if (start < 0 || end <= start) return emptyList()
-
         return runCatching {
-            val array = JSONArray(raw.substring(start, end + 1))
+            val root = org.json.JSONObject(raw)
+            val array = root.optJSONArray("elements") ?: JSONArray()
             buildList {
                 for (i in 0 until array.length()) {
                     val item = array.optJSONObject(i) ?: continue
                     val type = runCatching {
                         EditorElementType.valueOf(item.optString("type"))
                     }.getOrNull() ?: continue
+
+                    val color = runCatching {
+                        val rawColor = item.optString("color", "")
+                            .removePrefix("0x").removePrefix("0X")
+                        if (rawColor.isBlank()) androidx.compose.ui.graphics.Color.White
+                        else androidx.compose.ui.graphics.Color(rawColor.toLong(16))
+                    }.getOrDefault(androidx.compose.ui.graphics.Color.White)
 
                     add(
                         EditorElement(
@@ -30,7 +33,7 @@ internal object SavedWatchfaceLoader {
                             size = item.optDouble("size", 24.0).toFloat(),
                             width = item.optDouble("width", 76.0).toFloat(),
                             height = item.optDouble("height", 55.0).toFloat(),
-                            color = parseColor(item.optString("color", ""), Color.White),
+                            color = color,
                             visible = item.optBoolean("visible", true),
                             locked = item.optBoolean("locked", false),
                             bold = item.optBoolean("bold", false),
@@ -47,11 +50,5 @@ internal object SavedWatchfaceLoader {
                 }
             }
         }.getOrDefault(emptyList())
-    }
-
-    private fun parseColor(raw: String, fallback: Color): Color {
-        val normalized = raw.removePrefix("0x").removePrefix("0X").trim()
-        if (normalized.isEmpty()) return fallback
-        return runCatching { Color(normalized.toULong(16)) }.getOrDefault(fallback)
     }
 }
