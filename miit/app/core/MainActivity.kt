@@ -212,13 +212,9 @@ private fun MiitApp() {
             else -> screen
         }
     }
-    DisposableEffect(Unit) {
-        onDispose {
-            // Keep the process-scoped Xiaomi connection alive when the Activity leaves.
-            scanner.close()
-        }
-    }
-
+    // BandScanner is process-scoped and owns the live Xiaomi SPP session.
+    // Do not close it when this Activity is recreated/backgrounded; the foreground
+    // connection service and scanner restore the session independently.
     val darkTheme = when (themeMode) {
         "dark" -> true
         "light" -> false
