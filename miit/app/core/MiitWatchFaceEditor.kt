@@ -1241,22 +1241,25 @@ private fun resolveProfile(device: BandDevice?): DeviceProfile {
 
 private fun serializeElements(elements: List<EditorElement>): String =
     elements.joinToString(prefix = "[", postfix = "]") { e ->
-        "{"
-            + "\"id\":${e.id},"
-            + "\"type\":\"${e.type.name}\","
-            + "\"preview\":\"${jsonEscape(e.preview)}\","
-            + "\"x\":${e.x},\"y\":${e.y},"
-            + "\"size\":${e.size},\"width\":${e.width},\"height\":${e.height},"
-            + "\"color\":\"${e.color.value.toString(16)}\","
-            + "\"bold\":${e.bold},"
-            + "\"alignment\":\"${jsonEscape(e.alignment)}\","
-            + "\"format\":\"${jsonEscape(e.format)}\","
-            + "\"handKind\":\"${jsonEscape(e.handKind)}\","
-            + "\"length\":${e.length},\"thickness\":${e.thickness},"
-            + "\"rotation\":${e.rotation},\"filled\":${e.filled},"
-            + "\"cornerRadius\":${e.cornerRadius},"
-            + "\"visible\":${e.visible},\"locked\":${e.locked}"
-            + "}"
+        buildString {
+            append("{")
+            append("\"id\":").append(e.id).append(",")
+            append("\"type\":\"").append(e.type.name).append("\",")
+            append("\"preview\":\"").append(jsonEscape(e.preview)).append("\",")
+            append("\"x\":").append(e.x).append(",\"y\":").append(e.y).append(",")
+            append("\"size\":").append(e.size).append(",\"width\":").append(e.width)
+                .append(",\"height\":").append(e.height).append(",")
+            append("\"color\":\"").append(e.color.value.toString(16)).append("\",")
+            append("\"bold\":").append(e.bold).append(",")
+            append("\"alignment\":\"").append(jsonEscape(e.alignment)).append("\",")
+            append("\"format\":\"").append(jsonEscape(e.format)).append("\",")
+            append("\"handKind\":\"").append(jsonEscape(e.handKind)).append("\",")
+            append("\"length\":").append(e.length).append(",\"thickness\":").append(e.thickness).append(",")
+            append("\"rotation\":").append(e.rotation).append(",\"filled\":").append(e.filled).append(",")
+            append("\"cornerRadius\":").append(e.cornerRadius).append(",")
+            append("\"visible\":").append(e.visible).append(",\"locked\":").append(e.locked)
+            append("}")
+        }
     }
 
 private fun jsonEscape(value: String): String =
