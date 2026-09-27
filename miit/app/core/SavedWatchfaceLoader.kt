@@ -44,7 +44,8 @@ internal object SavedWatchfaceLoader {
                             thickness = item.optDouble("thickness", 2.0).toFloat(),
                             rotation = item.optDouble("rotation", 0.0).toFloat(),
                             filled = item.optBoolean("filled", false),
-                            cornerRadius = item.optDouble("cornerRadius", 0.0).toFloat()
+                            cornerRadius = item.optDouble("cornerRadius", 0.0).toFloat(),
+                            brushPath = item.optString("brushPath", "")
                         )
                     )
                 }

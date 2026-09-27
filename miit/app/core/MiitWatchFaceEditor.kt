@@ -69,6 +69,7 @@ private enum class ToolCategory(val icon: String, val title: String) {
     DATA("◉", "Data"),
     SHAPE("○", "Shape"),
     MEDIA("▣", "Media"),
+    BRUSH("✎", "Brush"),
     LAYERS("≡", "Layers"),
     STYLE("✦", "Style"),
     AOD("☾", "AOD"),
@@ -79,7 +80,7 @@ private enum class ToolCategory(val icon: String, val title: String) {
 internal enum class EditorElementType {
     TIME, DATE, WEEKDAY, HEART_RATE, SPO2, STEPS, BATTERY, CALORIES,
     DISTANCE, SLEEP, WEATHER, DIGITAL_NUMBER, ANALOG_CLOCK, ANALOG_HAND, CLOCK_FACE, ARC_PROGRESS,
-    LINE_PROGRESS, CONTAINER, TEXT, CIRCLE, RECTANGLE, ROUNDED_RECTANGLE, ELLIPSE, TRIANGLE, LINE, ARC, IMAGE
+    LINE_PROGRESS, CONTAINER, TEXT, CIRCLE, RECTANGLE, ROUNDED_RECTANGLE, ELLIPSE, TRIANGLE, LINE, ARC, BRUSH, IMAGE
 }
 
 internal data class EditorElement(
@@ -102,7 +103,8 @@ internal data class EditorElement(
     val thickness: Float = 2f,
     val rotation: Float = 0f,
     val filled: Boolean = false,
-    val cornerRadius: Float = 0f
+    val cornerRadius: Float = 0f,
+    val brushPath: String = ""
 )
 
 @Composable
@@ -142,6 +144,8 @@ fun MiitWatchFaceEditor(
     var referencePath by remember(display?.stableId) { mutableStateOf(display?.previewPath) }
     var layersOpen by remember { mutableStateOf(false) }
     var referenceOpacity by remember { mutableStateOf(0.65f) }
+    var brushSize by remember { mutableStateOf(6f) }
+    var brushColor by remember { mutableStateOf(Color.White) }
     var propertiesOpen by remember { mutableStateOf(false) }
     var undoStack by remember { mutableStateOf<List<List<EditorElement>>>(emptyList()) }
     var redoStack by remember { mutableStateOf<List<List<EditorElement>>>(emptyList()) }
@@ -168,6 +172,44 @@ fun MiitWatchFaceEditor(
     fun snapshotBeforeChange() {
         undoStack = (undoStack + listOf(elements.toList())).takeLast(40)
         redoStack = emptyList()
+    }
+
+    fun applyLayerAction(id: Int, action: String) {
+        val index = elements.indexOfFirst { it.id == id }
+        if (index < 0) return
+        snapshotBeforeChange()
+        when (action) {
+            "hide" -> elements[index] = elements[index].copy(visible = !elements[index].visible)
+            "lock" -> elements[index] = elements[index].copy(locked = !elements[index].locked)
+            "delete" -> {
+                elements.removeAt(index)
+                selectedId = elements.firstOrNull()?.id ?: 0
+            }
+            "front" -> {
+                val item = elements.removeAt(index)
+                elements += item
+                selectedId = item.id
+            }
+            "back" -> {
+                val item = elements.removeAt(index)
+                elements.add(0, item)
+                selectedId = item.id
+            }
+            "up" -> {
+                if (index < elements.lastIndex) {
+                    val item = elements.removeAt(index)
+                    elements.add(index + 1, item)
+                    selectedId = item.id
+                }
+            }
+            "down" -> {
+                if (index > 0) {
+                    val item = elements.removeAt(index)
+                    elements.add(index - 1, item)
+                    selectedId = item.id
+                }
+            }
+        }
     }
 
     fun addElement(type: EditorElementType) {
@@ -320,6 +362,10 @@ fun MiitWatchFaceEditor(
             selected = elements.firstOrNull { it.id == selectedId },
             aodEnabled = aodEnabled,
             onAodChange = { aodEnabled = it },
+            brushSize = brushSize,
+            brushColor = brushColor,
+            onBrushSizeChange = { brushSize = it },
+            onBrushColorChange = { brushColor = it },
             onAdd = ::addElement,
             selectHandByName = { hand ->
                 val idx = elements.indexOfFirst { it.type == EditorElementType.ANALOG_HAND && it.handKind == hand }
@@ -377,25 +423,7 @@ fun MiitWatchFaceEditor(
             },
             onLayerAction = { action ->
                 layersOpen = true
-                snapshotBeforeChange()
-                val selected = elements.indexOfFirst { it.id == selectedId }
-                if (selected < 0) return@SubToolBar
-                when (action) {
-                    "hide" -> elements[selected] = elements[selected].copy(visible = !elements[selected].visible)
-                    "lock" -> elements[selected] = elements[selected].copy(locked = !elements[selected].locked)
-                    "delete" -> {
-                        elements.removeAt(selected)
-                        selectedId = elements.firstOrNull()?.id ?: 0
-                    }
-                    "front" -> {
-                        val item = elements.removeAt(selected)
-                        elements += item
-                    }
-                    "back" -> {
-                        val item = elements.removeAt(selected)
-                        elements.add(0, item)
-                    }
-                }
+                applyLayerAction(selectedId, action)
             },
             modifier = Modifier.fillMaxWidth().height(58.dp)
         )
@@ -421,6 +449,31 @@ fun MiitWatchFaceEditor(
                             y = (current.y + dy).coerceIn(0f, 100f)
                         )
                     }
+                },
+                brushMode = selectedTool == ToolCategory.BRUSH,
+                brushSize = brushSize,
+                brushColor = brushColor,
+                onBrushStroke = { points ->
+                    if (points.size >= 2) {
+                        snapshotBeforeChange()
+                        val path = points.joinToString(";") { "${it.first},${it.second}" }
+                        val first = points.first()
+                        val id = nextId++
+                        elements += EditorElement(
+                            id = id,
+                            type = EditorElementType.BRUSH,
+                            preview = "",
+                            x = first.first,
+                            y = first.second,
+                            size = brushSize,
+                            width = 100f,
+                            height = 100f,
+                            color = brushColor,
+                            thickness = brushSize,
+                            brushPath = path
+                        )
+                        selectedId = id
+                    }
                 }
             )
             if (layersOpen) {
@@ -428,6 +481,7 @@ fun MiitWatchFaceEditor(
                     elements = elements,
                     selectedId = selectedId,
                     onSelect = { selectedId = it },
+                    onAction = { id, action -> applyLayerAction(id, action) },
                     onClose = { layersOpen = false },
                     modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(175.dp)
                 )
@@ -475,6 +529,10 @@ private fun SubToolBar(
     selected: EditorElement?,
     aodEnabled: Boolean,
     onAodChange: (Boolean) -> Unit,
+    brushSize: Float,
+    brushColor: Color,
+    onBrushSizeChange: (Float) -> Unit,
+    onBrushColorChange: (Color) -> Unit,
     onAdd: (EditorElementType) -> Unit,
     onAddSource: (String) -> Unit,
     selectHandByName: (String) -> Unit,
@@ -575,6 +633,25 @@ private fun SubToolBar(
         ToolCategory.MEDIA -> listOf(
             SubAction("▧", "Photo") { onPickImage() },
             SubAction("◎", "Reference") { onReference() }
+        )
+        ToolCategory.BRUSH -> listOf(
+            SubAction("✎", "Brush") { },
+            SubAction("2", "2 px") { onBrushSizeChange(2f) },
+            SubAction("4", "4 px") { onBrushSizeChange(4f) },
+            SubAction("6", "6 px") { onBrushSizeChange(6f) },
+            SubAction("10", "10 px") { onBrushSizeChange(10f) },
+            SubAction("16", "16 px") { onBrushSizeChange(16f) },
+            SubAction("24", "24 px") { onBrushSizeChange(24f) },
+            SubAction("W", "White") { onBrushColorChange(Color.White) },
+            SubAction("K", "Black") { onBrushColorChange(Color.Black) },
+            SubAction("R", "Red") { onBrushColorChange(Color(0xFFFF5252)) },
+            SubAction("O", "Orange") { onBrushColorChange(Color(0xFFFF9800)) },
+            SubAction("Y", "Yellow") { onBrushColorChange(Color(0xFFFFD740)) },
+            SubAction("G", "Green") { onBrushColorChange(Color(0xFF69F0AE)) },
+            SubAction("C", "Cyan") { onBrushColorChange(Color(0xFF40C4FF)) },
+            SubAction("B", "Blue") { onBrushColorChange(Color(0xFF536DFE)) },
+            SubAction("P", "Purple") { onBrushColorChange(Color(0xFFB388FF)) },
+            SubAction("M", "Pink") { onBrushColorChange(Color(0xFFFF4081)) }
         )
         ToolCategory.LAYERS -> listOf(
             SubAction("↑", "Front") { onLayerAction("front") },
@@ -747,7 +824,11 @@ private fun WatchCanvasV2(
     referenceOpacity: Float,
     metadataOnly: Boolean,
     onSelect: (Int) -> Unit,
-    onMove: (Int, Float, Float) -> Unit
+    onMove: (Int, Float, Float) -> Unit,
+    brushMode: Boolean = false,
+    brushSize: Float = 6f,
+    brushColor: Color = Color.White,
+    onBrushStroke: (List<Pair<Float, Float>>) -> Unit = {}
 ) {
     Box(Modifier.fillMaxSize().background(Color(0xFF0D0E10)), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -764,6 +845,7 @@ private fun WatchCanvasV2(
                     val x = (element.x / 100f * 166f).dp
                     val y = (element.y / 100f * ((190f * profile.height / profile.width) - 10f)).dp
                     when (element.type) {
+                        EditorElementType.BRUSH -> EditorBrushLayer(element, element.id == selectedId)
                         EditorElementType.IMAGE -> EditorImageLayer(element, x, y, element.id == selectedId, onSelect, onMove)
                         EditorElementType.CIRCLE, EditorElementType.RECTANGLE, EditorElementType.ROUNDED_RECTANGLE,
                         EditorElementType.ELLIPSE, EditorElementType.TRIANGLE, EditorElementType.LINE, EditorElementType.ARC ->
@@ -807,6 +889,49 @@ private fun WatchCanvasV2(
                         modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp)
                     )
                 }
+                if (brushMode) {
+                    var stroke by remember { mutableStateOf<List<Offset>>(emptyList()) }
+                    Canvas(
+                        Modifier
+                            .fillMaxSize()
+                            .pointerInput(brushMode, brushSize, brushColor) {
+                                detectDragGestures(
+                                    onDragStart = { offset -> stroke = listOf(offset) },
+                                    onDrag = { change, _ ->
+                                        change.consume()
+                                        stroke = stroke + change.position
+                                    },
+                                    onDragEnd = {
+                                        val w = size.width.coerceAtLeast(1).toFloat()
+                                        val h = size.height.coerceAtLeast(1).toFloat()
+                                        val normalized = stroke.map {
+                                            (it.x / w * 100f).coerceIn(0f, 100f) to
+                                                (it.y / h * 100f).coerceIn(0f, 100f)
+                                        }
+                                        onBrushStroke(normalized)
+                                        stroke = emptyList()
+                                    },
+                                    onDragCancel = { stroke = emptyList() }
+                                )
+                            }
+                    ) {
+                        if (stroke.isNotEmpty()) {
+                            val path = androidx.compose.ui.graphics.Path().apply {
+                                moveTo(stroke.first().x, stroke.first().y)
+                                stroke.drop(1).forEach { lineTo(it.x, it.y) }
+                            }
+                            drawPath(
+                                path = path,
+                                color = brushColor,
+                                style = Stroke(
+                                    width = brushSize.dp.toPx(),
+                                    cap = StrokeCap.Round,
+                                    join = androidx.compose.ui.graphics.StrokeJoin.Round
+                                )
+                            )
+                        }
+                    }
+                }
             }
             Spacer(Modifier.height(8.dp))
             Text("${profile.width} × ${profile.height} px  •  ${profile.source}", color = Color.Gray, fontSize = 10.sp)
@@ -814,6 +939,43 @@ private fun WatchCanvasV2(
                 Text("Band metadata only — add a reference image to trace the original face", color = Color(0xFF9AA0AA), fontSize = 10.sp)
             }
         }
+    }
+}
+
+@Composable
+private fun EditorBrushLayer(
+    element: EditorElement,
+    selected: Boolean
+) {
+    val points = remember(element.brushPath) {
+        element.brushPath.split(";").mapNotNull { pair ->
+            val parts = pair.split(",")
+            if (parts.size != 2) return@mapNotNull null
+            val px = parts[0].toFloatOrNull() ?: return@mapNotNull null
+            val py = parts[1].toFloatOrNull() ?: return@mapNotNull null
+            px to py
+        }
+    }
+    Canvas(Modifier.fillMaxSize()) {
+        if (points.isEmpty()) return@Canvas
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(points.first().first / 100f * size.width, points.first().second / 100f * size.height)
+            points.drop(1).forEach { point ->
+                lineTo(point.first / 100f * size.width, point.second / 100f * size.height)
+            }
+        }
+        if (selected) {
+            drawPath(path, color = element.color.copy(alpha = 0.22f), style = Stroke(width = (element.thickness + 5f).dp.toPx(), cap = StrokeCap.Round))
+        }
+        drawPath(
+            path,
+            color = element.color,
+            style = Stroke(
+                width = element.thickness.coerceAtLeast(1f).dp.toPx(),
+                cap = StrokeCap.Round,
+                join = androidx.compose.ui.graphics.StrokeJoin.Round
+            )
+        )
     }
 }
 
@@ -1058,6 +1220,7 @@ private fun LayerPanel(
     elements: List<EditorElement>,
     selectedId: Int,
     onSelect: (Int) -> Unit,
+    onAction: (Int, String) -> Unit = { _, _ -> },
     onClose: () -> Unit,
     modifier: Modifier
 ) {
@@ -1077,20 +1240,53 @@ private fun LayerPanel(
                         RoundedCornerShape(8.dp)
                     )
                     .clickable { onSelect(element.id) }
-                    .padding(vertical = 7.dp, horizontal = 6.dp),
+                    .padding(vertical = 5.dp, horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(if (element.visible) "◉" else "○", color = Color.White, modifier = Modifier.width(23.dp))
+                Box(
+                    Modifier.size(30.dp)
+                        .background(Color(0xFF24252A), RoundedCornerShape(6.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        when (element.type) {
+                            EditorElementType.BRUSH -> "✎"
+                            EditorElementType.TEXT -> "T"
+                            EditorElementType.IMAGE -> "▧"
+                            EditorElementType.TIME, EditorElementType.DATE, EditorElementType.WEEKDAY,
+                            EditorElementType.DIGITAL_NUMBER -> "12"
+                            else -> "◇"
+                        },
+                        color = Color.White,
+                        fontSize = 11.sp
+                    )
+                }
                 Text(
                     element.type.name.replace('_', ' '),
                     color = if (element.id == selectedId) Color(0xFF4BC9BF) else Color.White,
-                    fontSize = 9.sp,
-                    modifier = Modifier.weight(1f)
+                    fontSize = 8.sp,
+                    modifier = Modifier.weight(1f).padding(start = 5.dp)
                 )
-                if (element.locked) Text("⌑", color = Color.Gray, fontSize = 10.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+                    LayerMiniButton("↑") { onAction(element.id, "up") }
+                    LayerMiniButton("↓") { onAction(element.id, "down") }
+                    LayerMiniButton(if (element.visible) "◉" else "○") { onAction(element.id, "hide") }
+                    LayerMiniButton(if (element.locked) "⌑" else "□") { onAction(element.id, "lock") }
+                    LayerMiniButton("×") { onAction(element.id, "delete") }
+                }
             }
         }
     }
+}
+
+@Composable
+private fun LayerMiniButton(label: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(22.dp)
+            .background(Color(0xFF202126), RoundedCornerShape(5.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) { Text(label, color = Color.White, fontSize = 9.sp) }
 }
 
 @Composable
@@ -1142,6 +1338,9 @@ private fun EditorPropertiesDialog(
                 item { OutlinedTextField(x, { x = it }, label = { Text("X %") }, singleLine = true) }
                 item { OutlinedTextField(y, { y = it }, label = { Text("Y %") }, singleLine = true) }
                 item { OutlinedTextField(size, { size = it }, label = { Text("Font/size") }, singleLine = true) }
+                if (element.type == EditorElementType.BRUSH) {
+                    item { OutlinedTextField(thickness, { thickness = it }, label = { Text("Brush size") }, singleLine = true) }
+                }
                 if (element.type == EditorElementType.ANALOG_HAND) {
                     item { Text("Hand: " + element.handKind, color = Color.Gray, fontSize = 11.sp) }
                     item { OutlinedTextField(length, { length = it }, label = { Text("Length %") }, singleLine = true) }
@@ -1257,7 +1456,8 @@ private fun serializeElements(elements: List<EditorElement>): String =
             append("\"length\":").append(e.length).append(",\"thickness\":").append(e.thickness).append(",")
             append("\"rotation\":").append(e.rotation).append(",\"filled\":").append(e.filled).append(",")
             append("\"cornerRadius\":").append(e.cornerRadius).append(",")
-            append("\"visible\":").append(e.visible).append(",\"locked\":").append(e.locked)
+            append("\"visible\":").append(e.visible).append(",\"locked\":").append(e.locked).append(",")
+            append("\"brushPath\":\"").append(jsonEscape(e.brushPath)).append("\"")
             append("}")
         }
     }

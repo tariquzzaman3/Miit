@@ -84,7 +84,8 @@ object MiitWatchfaceCompiler {
         append("\"thickness\": ").append(number(element.thickness)).append(", ")
         append("\"rotation\": ").append(number(element.rotation)).append(", ")
         append("\"filled\": ").append(element.filled).append(", ")
-        append("\"cornerRadius\": ").append(number(element.cornerRadius))
+        append("\"cornerRadius\": ").append(number(element.cornerRadius)).append(", ")
+        append("\"brushPath\": ").append(string(element.brushPath))
         append("}")
     }
 
