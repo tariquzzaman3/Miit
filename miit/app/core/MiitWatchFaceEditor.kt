@@ -232,6 +232,7 @@ fun MiitWatchFaceEditor(
             elements += EditorElement(minuteId, EditorElementType.ANALOG_HAND, "", 50f, 48f, 0f, color = Color.White, handKind = "Minute", length = 52f, thickness = 3.5f)
             elements += EditorElement(secondId, EditorElementType.ANALOG_HAND, "", 50f, 48f, 0f, color = Color(0xFFFF5B5B), handKind = "Second", length = 60f, thickness = 1.5f)
             selectedId = hourId
+            selectedTool = ToolCategory.DATA
             return
         }
         val id = nextId++
@@ -244,6 +245,7 @@ fun MiitWatchFaceEditor(
             size = if (type == EditorElementType.TIME) 36f else 18f
         )
         selectedId = id
+        selectedTool = toolForElement(type)
         colorMixerOpen = false
         if (type == EditorElementType.TEXT) editingTextId = id
         if (type == EditorElementType.DIGITAL_NUMBER) sourcePicker = true
@@ -534,7 +536,11 @@ fun MiitWatchFaceEditor(
                         referencePath = referencePath,
                         referenceOpacity = referenceOpacity,
                         metadataOnly = display != null,
-                        onSelect = { selectedId = it },
+                        onSelect = {
+                            selectedId = it
+                            selectedTool = toolForElement(elements.firstOrNull { element -> element.id == it }?.type)
+                            colorMixerOpen = false
+                        },
                         onMove = { id, dx, dy ->
                             val index = elements.indexOfFirst { it.id == id }
                             if (index >= 0 && !elements[index].locked) {
@@ -616,7 +622,11 @@ fun MiitWatchFaceEditor(
                         LayerPanel(
                             elements = elements,
                             selectedId = selectedId,
-                            onSelect = { selectedId = it },
+                            onSelect = {
+                                selectedId = it
+                                selectedTool = toolForElement(elements.firstOrNull { element -> element.id == it }?.type)
+                                colorMixerOpen = false
+                            },
                             onAction = { id, action -> applyLayerAction(id, action) },
                             onClose = { layersOpen = false },
                             modifier = Modifier
