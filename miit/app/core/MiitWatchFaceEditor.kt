@@ -776,9 +776,8 @@ fun MiitWatchFaceEditor(
                                 "Install blocked: MIIT could not verify this Band as a supported Band 9/10 target.",
                                 Toast.LENGTH_LONG
                             ).show()
-                            return@SubToolBar
-                        }
-                        runCatching {
+                        } else {
+                            runCatching {
                             MiitNativeWatchfaceCompiler.compile(
                                 context = context,
                                 name = display?.name ?: "MIIT Watch Face",
@@ -799,7 +798,7 @@ fun MiitWatchFaceEditor(
                                 ).show()
                             }
                     },
-                    onAi = {
+                                        onAi = {
                         aiOpen = true
                         selectedTool = ToolCategory.AI
                     },
