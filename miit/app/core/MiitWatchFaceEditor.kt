@@ -29,7 +29,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -45,6 +47,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -156,6 +159,12 @@ fun MiitWatchFaceEditor(
     var brushColor by remember { mutableStateOf(Color.White) }
     var colorMixerOpen by remember { mutableStateOf(false) }
     var propertiesOpen by remember { mutableStateOf(false) }
+    var aiOpen by remember { mutableStateOf(false) }
+    var aiBusy by remember { mutableStateOf(false) }
+    var aiPrompt by remember { mutableStateOf("") }
+    val aiMessages = remember { mutableStateListOf<AiChatMessage>() }
+    val aiListState = rememberLazyListState()
+    val aiScope = rememberCoroutineScope()
     var undoStack by remember { mutableStateOf<List<List<EditorElement>>>(emptyList()) }
     var redoStack by remember { mutableStateOf<List<List<EditorElement>>>(emptyList()) }
 
