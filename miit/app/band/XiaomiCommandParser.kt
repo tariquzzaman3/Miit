@@ -43,7 +43,9 @@ object XiaomiCommandParser {
         val watchfaces: List<BandDisplay> = emptyList(),
         val installStatus: Int? = null,
         val uploadResumePosition: Int? = null,
-        val uploadChunkSize: Int? = null
+        val uploadChunkSize: Int? = null,
+        val uploadStatus: Int? = null,
+        val watchfaceAck: Int? = null
     )
 
     fun parse(data: ByteArray): Parsed? {
@@ -216,11 +218,20 @@ object XiaomiCommandParser {
         if (subtype == WATCHFACE_INSTALL) {
             val r = ProtoReader(watchface)
             var installStatus: Int? = null
+            var watchfaceAck: Int? = null
             while (r.hasRemaining()) {
                 val f = r.nextField() ?: break
-                if (f.number == 5) installStatus = f.varint?.toInt()
+                when (f.number) {
+                    4 -> watchfaceAck = f.varint?.toInt()
+                    5 -> installStatus = f.varint?.toInt()
+                }
             }
-            return Parsed(type, subtype, installStatus = installStatus)
+            return Parsed(
+                type = type,
+                subtype = subtype,
+                installStatus = installStatus,
+                watchfaceAck = watchfaceAck
+            )
         }
         if (subtype != WATCHFACE_LIST) return Parsed(type, subtype)
 
@@ -288,6 +299,7 @@ object XiaomiCommandParser {
 
     private fun parseDataUpload(type: Int, subtype: Int, dataUpload: ByteArray?): Parsed {
         if (dataUpload == null) return Parsed(type, subtype)
+        var status: Int? = null
         var resume: Int? = null
         var chunk: Int? = null
         val outer = ProtoReader(dataUpload)
@@ -298,6 +310,7 @@ object XiaomiCommandParser {
             while (ack.hasRemaining()) {
                 val f = ack.nextField() ?: break
                 when (f.number) {
+                    2 -> status = f.varint?.toInt()
                     4 -> resume = f.varint?.toInt()
                     5 -> chunk = f.varint?.toInt()
                 }
@@ -307,7 +320,8 @@ object XiaomiCommandParser {
             type = type,
             subtype = subtype,
             uploadResumePosition = resume,
-            uploadChunkSize = chunk
+            uploadChunkSize = chunk,
+            uploadStatus = status
         )
     }
 
