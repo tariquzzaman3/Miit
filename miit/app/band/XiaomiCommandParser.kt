@@ -371,10 +371,10 @@ object XiaomiCommandParser {
                 24,
                 fieldBytes(
                     1,
-                    fieldBytes(1, DATA_UPLOAD_WATCHFACE)
-                ) +
-                    fieldBytes(2, md5) +
-                    fieldVarint(3, size)
+                    fieldVarint(1, DATA_UPLOAD_WATCHFACE) +
+                        fieldBytes(2, md5) +
+                        fieldVarint(3, size)
+                )
             )
 
     fun command(type: Int, subtype: Int): ByteArray =
