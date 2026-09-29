@@ -21,6 +21,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import com.miit.app.MiitWatchfaceSafety
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -383,6 +384,29 @@ class BandScanner(context: Context, initialActivity: Activity? = null) {
             MiitTestLog.add("Watchface install rejected: SPP connection unavailable")
             return false
         }
+
+        val address = activeAddress
+        val device = _devices.value.firstOrNull { it.address.equals(address, ignoreCase = true) }
+        val packageReport = MiitWatchfaceSafety.inspectPackage(id, bytes)
+        val preflight = MiitWatchfaceSafety.preflightBand(
+            context = appContext,
+            device = device,
+            report = packageReport,
+            requestedId = id
+        )
+        if (!preflight.safe) {
+            val reason = preflight.errors.joinToString(" ")
+            MiitTestLog.add("Watchface install blocked by safety preflight: " + reason)
+            mainHandler.post { onResult(false, "Safety check blocked installation: " + reason) }
+            return false
+        }
+        preflight.warnings.forEach { MiitTestLog.add("Watchface safety warning: " + it) }
+        MiitTestLog.add(
+            "Watchface safety preflight passed: model=" + (device?.model ?: device?.name) +
+                " battery=" + device?.batteryPercentage + "% package=" + packageReport.sizeLabel +
+                " sha256=" + packageReport.sha256
+        )
+
         return connection.installWatchface(
             id = id,
             bytes = bytes,
