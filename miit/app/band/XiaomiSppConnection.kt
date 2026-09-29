@@ -93,6 +93,10 @@ class XiaomiSppConnection(
         rxBuffer.reset()
         parserVersion = 1
         txSequence.set(0)
+        watchfaceInstallId = null
+        watchfaceInstallBytes = null
+        watchfaceInstallProgress = null
+        watchfaceInstallResult = null
     }
 
     @SuppressLint("MissingPermission")
@@ -313,7 +317,7 @@ class XiaomiSppConnection(
         requests.forEach { (name, payload) -> sendProtoCommand(name, payload) }
     }
 
-    fun sendProtoCommand(name: String, payload: ByteArray): Boolean {
+    fun installWatchface(\n        id: String,\n        bytes: ByteArray,\n        onProgress: (Int) -> Unit = {},\n        onResult: (Boolean, String) -> Unit = { _, _ -> }\n    ): Boolean {\n        if (!running || !authenticated || auth == null) {\n            onResult(false, "Band is not authenticated")\n            onEvent("Xiaomi watchface install rejected: not authenticated")\n            return false\n        }\n        if (!Regex("[0-9]{9}").matches(id)) {\n            onResult(false, "Watchface ID must contain 9 digits")\n            return false\n        }\n        if (watchfaceInstallBytes != null) {\n            onResult(false, "Another watchface upload is already running")\n            return false\n        }\n        if (bytes.isEmpty()) {\n            onResult(false, "Watchface package is empty")\n            return false\n        }\n        watchfaceInstallId = id\n        watchfaceInstallBytes = bytes.copyOf()\n        watchfaceInstallProgress = onProgress\n        watchfaceInstallResult = onResult\n        onProgress(0)\n        val sent = sendProtoCommand(\n            "watchface install start",\n            XiaomiCommandParser.watchfaceInstallStart(id, bytes.size)\n        )\n        if (!sent) finishWatchfaceInstall(false, "Could not send install-start command")\n        return sent\n    }\n\n    fun sendProtoCommand(name: String, payload: ByteArray): Boolean {
         if (!running || !authenticated || auth == null) {
             onEvent("Xiaomi SPP: send '$name' rejected; not authenticated")
             return false
