@@ -54,7 +54,6 @@ object MiitNativeWatchfaceCompiler {
         }
 
         val safeName = name.trim().ifBlank { "MIIT Watch Face" }.take(60)
-        val id = stableId(safeName, target)
         val normalBitmap = render(context, target, elements, darkAod = false)
         val normalImage = encodeImage(normalBitmap)
         normalBitmap.recycle()
@@ -65,12 +64,15 @@ object MiitNativeWatchfaceCompiler {
         val normalDefinitionBytes = DEFINITION_SIZE * 2
         val normalPropertyBytes = ELEMENT_PROPERTY_SIZE
         val normalPropertyStart = normalDefinitionStart + normalDefinitionBytes
+        // Resource 0 is the active image itself; never point a definition past its data.
         val previewOffset = normalPropertyStart + normalPropertyBytes
-        val normalResourceStart = previewOffset + normalImage.size
+        val normalResourceStart = previewOffset
 
         val aodBitmap = if (aod) render(context, target, elements, darkAod = true) else null
         val aodImage = aodBitmap?.let { encodeImage(it) }
         aodBitmap?.recycle()
+
+        val id = stableId(safeName, target, normalImage, aodImage)
 
         val normalFaceData = makeFaceData(
             definitionStart = normalDefinitionStart,
@@ -123,8 +125,14 @@ object MiitNativeWatchfaceCompiler {
         }
 
         val binary = concatenate(parts)
+        val safety = MiitWatchfaceSafety.inspectPackage(id, binary)
+        require(safety.safe) {
+            "Generated watch-face package failed MIIT safety validation: " +
+                safety.errors.joinToString("; ")
+        }
+        warnings += safety.warnings
         warnings += "The current native install path rasterizes the editor into a static full-screen face; on-band widgets are not yet dynamic."
-        return Result(id, safeName, binary, warnings)
+        return Result(id, safeName, binary, warnings.distinct())
     }
 
     private const val MAIN_HEADER_SIZE = 0xA8
@@ -133,9 +141,19 @@ object MiitNativeWatchfaceCompiler {
     private const val ELEMENT_PROPERTY_SIZE = 16
     private const val IMAGE_HEADER_SIZE = 12
 
-    private fun stableId(name: String, target: Target): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest((name + "|" + target.width + "x" + target.height + "|" + target.model.orEmpty()).toByteArray())
+    private fun stableId(name: String, target: Target, normalImage: ByteArray, aodImage: ByteArray?): String {
+        val digestInput = ByteArrayOutputStream().apply {
+            write(name.toByteArray(Charsets.UTF_8))
+            write(0)
+            write((target.width.toString() + "x" + target.height + "|" + target.model.orEmpty()).toByteArray(Charsets.UTF_8))
+            write(0)
+            write(normalImage)
+            aodImage?.let {
+                write(0)
+                write(it)
+            }
+        }.toByteArray()
+        val digest = MessageDigest.getInstance("SHA-256").digest(digestInput)
         var value = 0L
         for (index in 0 until 4) {
             value = (value shl 8) or (digest[index].toLong() and 0xFFL)
