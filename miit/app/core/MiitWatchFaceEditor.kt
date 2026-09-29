@@ -51,12 +51,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -477,7 +480,32 @@ fun MiitWatchFaceEditor(
                         )
                         selectedId = id
                     }
+                },
+                onResize = { id, dx, dy ->
+                    val index = elements.indexOfFirst { it.id == id }
+                    if (index >= 0 && !elements[index].locked) {
+                        val current = elements[index]
+                        val newWidth = (current.width + dx / 1.66f).coerceIn(10f, 180f)
+                        val newHeight = (current.height + dy / 4.08f).coerceIn(10f, 180f)
+                        elements[index] = current.copy(width = newWidth, height = newHeight)
+                    }
+                },
+                onRotate = { id, delta ->
+                    val index = elements.indexOfFirst { it.id == id }
+                    if (index >= 0 && !elements[index].locked) {
+                        elements[index] = elements[index].copy(rotation = normalizeAngle(elements[index].rotation + delta))
+                    }
+                },
+                onDeleteElement = { id ->
+                    snapshotBeforeChange()
+                    elements.removeAll { it.id == id }
+                    if (selectedId == id) selectedId = elements.firstOrNull()?.id ?: 0
+                    colorMixerOpen = false
                 }
+            )
+            LayerDockButton(
+                onClick = { layersOpen = !layersOpen },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 10.dp)
             )
             if (layersOpen) {
                 LayerPanel(
@@ -486,7 +514,7 @@ fun MiitWatchFaceEditor(
                     onSelect = { selectedId = it },
                     onAction = { id, action -> applyLayerAction(id, action) },
                     onClose = { layersOpen = false },
-                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(175.dp)
+                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(194.dp)
                 )
             }
         }
@@ -520,7 +548,7 @@ private fun HorizontalToolBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        ToolCategory.values().forEach { tool ->
+        ToolCategory.values().filterNot { it == ToolCategory.LAYERS }.forEach { tool ->
             ToolCell(tool.icon, tool.title, selected == tool, onClick = { onSelect(tool) })
         }
     }
@@ -543,6 +571,11 @@ private fun normalizeAngle(value: Float): Float {
     return result
 }
 
+private fun elementScaledWidth(element: EditorElement, base: Dp): Dp =
+    base * (element.width / 76f).coerceIn(0.1f, 4f)
+
+private fun elementScaledHeight(element: EditorElement, base: Dp): Dp =
+    base * (element.height / 55f).coerceIn(0.1f, 4f)
 @Composable
 private fun ElementContextBar(
     element: EditorElement,
@@ -903,7 +936,10 @@ private fun WatchCanvasV2(
     brushMode: Boolean = false,
     brushSize: Float = 6f,
     brushColor: Color = Color.White,
-    onBrushStroke: (List<Pair<Float, Float>>) -> Unit = {}
+    onBrushStroke: (List<Pair<Float, Float>>) -> Unit = {},
+    onResize: (Int, Float, Float) -> Unit = { _, _, _ -> },
+    onRotate: (Int, Float) -> Unit = { _, _ -> },
+    onDeleteElement: (Int) -> Unit = {}
 ) {
     Box(Modifier.fillMaxSize().background(Color(0xFF0D0E10)), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -941,20 +977,19 @@ private fun WatchCanvasV2(
                                     }
                                 }
                         )
-                        else -> Text(
-                            renderElementValue(element, device),
-                            color = element.color,
-                            fontSize = element.size.sp,
-                            fontWeight = if (element.bold || element.type == EditorElementType.TIME) FontWeight.Bold else FontWeight.Normal,
-                            modifier = Modifier.padding(start = x, top = y).pointerInput(element.id) {
-                                detectDragGestures { change, amount ->
-                                    change.consume()
-                                    onSelect(element.id)
-                                    onMove(element.id, amount.x / 1.66f, amount.y / 4.08f)
-                                }
-                            }
-                        )
+                        else -> EditorTextLayer(element, x, y, element.id == selectedId, onSelect, onMove, device)
                     }
+                }
+                elements.firstOrNull { it.id == selectedId }?.takeIf { isContextualElement(it.type) }?.let { selected ->
+                    EditorSelectionOverlay(
+                        element = selected,
+                        canvasWidthDp = 166.dp,
+                        canvasHeightDp = ((190f * profile.height / profile.width) - 10f).dp,
+                        onMove = { id, dx, dy -> onMove(id, dx / 1.66f, dy / 4.08f) },
+                        onResize = onResize,
+                        onRotate = onRotate,
+                        onDelete = onDeleteElement
+                    )
                 }
                 if (metadataOnly && display?.previewPath == null) {
                     Text(
@@ -1033,24 +1068,27 @@ private fun EditorBrushLayer(
     }
     Canvas(Modifier.fillMaxSize()) {
         if (points.isEmpty()) return@Canvas
+        val minX = points.minOf { it.first }
+        val maxX = points.maxOf { it.first }
+        val minY = points.minOf { it.second }
+        val maxY = points.maxOf { it.second }
+        val centerX = ((minX + maxX) / 2f) / 100f * size.width
+        val centerY = ((minY + maxY) / 2f) / 100f * size.height
         val path = androidx.compose.ui.graphics.Path().apply {
             moveTo(points.first().first / 100f * size.width, points.first().second / 100f * size.height)
             points.drop(1).forEach { point ->
                 lineTo(point.first / 100f * size.width, point.second / 100f * size.height)
             }
         }
-        if (selected) {
-            drawPath(path, color = element.color.copy(alpha = 0.22f), style = Stroke(width = (element.thickness + 5f).dp.toPx(), cap = StrokeCap.Round))
+        withTransform({
+            translate(centerX, centerY)
+            rotate(element.rotation)
+            scale(element.width / 100f, element.height / 100f)
+            translate(-centerX, -centerY)
+        }) {
+            if (selected) drawPath(path, color = element.color.copy(alpha = 0.22f), style = Stroke(width = (element.thickness + 5f).dp.toPx(), cap = StrokeCap.Round))
+            drawPath(path, color = element.color, style = Stroke(width = element.thickness.coerceAtLeast(1f).dp.toPx(), cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
         }
-        drawPath(
-            path,
-            color = element.color,
-            style = Stroke(
-                width = element.thickness.coerceAtLeast(1f).dp.toPx(),
-                cap = StrokeCap.Round,
-                join = androidx.compose.ui.graphics.StrokeJoin.Round
-            )
-        )
     }
 }
 
@@ -1078,7 +1116,8 @@ private fun EditorImageLayer(
     }
     Box(
         Modifier.padding(start = x, top = y)
-            .size(86.dp, 64.dp)
+            .size(elementScaledWidth(element, 86.dp), elementScaledHeight(element, 64.dp))
+            .graphicsLayer(rotationZ = element.rotation)
             .background(if (selected) Color(0x443F78FF) else Color.Transparent, RoundedCornerShape(4.dp))
             .pointerInput(element.id) {
                 detectDragGestures { change, amount ->
@@ -1105,7 +1144,8 @@ private fun EditorShapeLayer(
 ) {
     Canvas(
         Modifier.padding(start = x, top = y)
-            .size(82.dp, 62.dp)
+            .size(elementScaledWidth(element, 82.dp), elementScaledHeight(element, 62.dp))
+            .graphicsLayer(rotationZ = element.rotation)
             .pointerInput(element.id) {
                 detectDragGestures(
                     onDragStart = { onSelect(element.id) },
@@ -1147,7 +1187,7 @@ private fun EditorShapeLayer(
                 strokeWidth = element.thickness.coerceAtLeast(0.5f).dp.toPx(),
                 cap = StrokeCap.Round
             )
-            EditorElementType.ARC -> drawArc(element.color, element.rotation - 90f, 270f, false, style = stroke)
+            EditorElementType.ARC -> drawArc(element.color, -90f, 270f, false, style = stroke)
             else -> Unit
         }
         if (selected) drawRect(Color(0x663F78FF), style = Stroke(1.dp.toPx()))
@@ -1291,6 +1331,119 @@ private fun EditorReferenceImage(source: String, modifier: Modifier) {
 }
 
 @Composable
+private fun EditorTextLayer(
+    element: EditorElement,
+    x: Dp,
+    y: Dp,
+    selected: Boolean,
+    onSelect: (Int) -> Unit,
+    onMove: (Int, Float, Float) -> Unit,
+    device: BandDevice?
+) {
+    Box(
+        Modifier.padding(start = x, top = y)
+            .size(elementScaledWidth(element, 104.dp), elementScaledHeight(element, 48.dp))
+            .graphicsLayer(rotationZ = element.rotation)
+            .pointerInput(element.id) {
+                detectDragGestures { change, amount ->
+                    change.consume()
+                    onSelect(element.id)
+                    onMove(element.id, amount.x / 1.66f, amount.y / 4.08f)
+                }
+            }
+            .background(if (selected) Color(0x183F78FF) else Color.Transparent, RoundedCornerShape(4.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            renderElementValue(element, device),
+            color = element.color,
+            fontSize = element.size.sp,
+            fontWeight = if (element.bold || element.type == EditorElementType.TIME) FontWeight.Bold else FontWeight.Normal,
+            textAlign = when (element.alignment) {
+                "Left" -> TextAlign.Start
+                "Right" -> TextAlign.End
+                else -> TextAlign.Center
+            },
+            maxLines = 2,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun LayerDockButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(modifier.size(44.dp).background(Color(0xFF1B1C21), RoundedCornerShape(13.dp)).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Text("≡", color = Color.White, fontSize = 22.sp)
+    }
+}
+
+@Composable
+private fun EditorSelectionOverlay(
+    element: EditorElement,
+    canvasWidthDp: Dp,
+    canvasHeightDp: Dp,
+    onMove: (Int, Float, Float) -> Unit,
+    onResize: (Int, Float, Float) -> Unit,
+    onRotate: (Int, Float) -> Unit,
+    onDelete: (Int) -> Unit
+) {
+    val points = remember(element.id, element.brushPath) {
+        element.brushPath.split(";").mapNotNull { pair ->
+            val p = pair.split(",")
+            if (p.size == 2) {
+                val px = p[0].toFloatOrNull(); val py = p[1].toFloatOrNull()
+                if (px != null && py != null) px to py else null
+            } else null
+        }
+    }
+    val brush = element.type == EditorElementType.BRUSH && points.isNotEmpty()
+    val left = if (brush) points.minOf { it.first } else element.x
+    val top = if (brush) points.minOf { it.second } else element.y
+    val right = if (brush) points.maxOf { it.first } else element.x + 20f
+    val bottom = if (brush) points.maxOf { it.second } else element.y + 20f
+    val baseW = if (element.type == EditorElementType.TEXT) 104f else 82f
+    val baseH = if (element.type == EditorElementType.TEXT) 48f else 62f
+    val width = if (brush) ((right - left).coerceAtLeast(10f) / 100f * canvasWidthDp.value * (element.width / 100f).coerceIn(0.1f, 4f)).dp else (baseW * (element.width / 76f).coerceIn(0.1f, 4f)).dp
+    val height = if (brush) ((bottom - top).coerceAtLeast(10f) / 100f * canvasHeightDp.value * (element.height / 100f).coerceIn(0.1f, 4f)).dp else (baseH * (element.height / 55f).coerceIn(0.1f, 4f)).dp
+    Box(
+        Modifier.offset((left / 100f * canvasWidthDp.value).dp, (top / 100f * canvasHeightDp.value).dp)
+            .size(width.coerceAtLeast(30.dp), height.coerceAtLeast(30.dp))
+            .graphicsLayer(rotationZ = element.rotation)
+            .border(1.dp, Color(0xFF60A5FA), RoundedCornerShape(5.dp))
+            .pointerInput(element.id, element.locked) {
+                detectDragGestures { change, amount ->
+                    change.consume()
+                    if (!element.locked) onMove(element.id, amount.x, amount.y)
+                }
+            }
+    ) {
+        TransformHandle(Alignment.TopStart, "×", onClick = { onDelete(element.id) })
+        TransformHandle(Alignment.TopEnd, "↻", onDrag = { dx, dy -> onRotate(element.id, (dx - dy) * 1.2f) })
+        TransformHandle(Alignment.BottomEnd, "↘", onDrag = { dx, dy -> onResize(element.id, dx, dy) })
+    }
+}
+
+@Composable
+private fun TransformHandle(
+    alignment: Alignment,
+    label: String,
+    onClick: (() -> Unit)? = null,
+    onDrag: ((Float, Float) -> Unit)? = null
+) {
+    Box(
+        Modifier.align(alignment).offset(
+            x = if (alignment == Alignment.TopStart || alignment == Alignment.BottomStart) (-9).dp else 9.dp,
+            y = if (alignment == Alignment.TopStart || alignment == Alignment.TopEnd) (-9).dp else 9.dp
+        ).size(20.dp).background(Color(0xFF1E293B), androidx.compose.foundation.shape.CircleShape).then(
+            if (onDrag != null) Modifier.pointerInput(label) {
+                detectDragGestures { change, amount -> change.consume(); onDrag(amount.x, amount.y) }
+            } else Modifier.clickable { onClick?.invoke() }
+        ),
+        contentAlignment = Alignment.Center
+    ) { Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+}
+
+@Composable
 private fun LayerPanel(
     elements: List<EditorElement>,
     selectedId: Int,
@@ -1343,11 +1496,10 @@ private fun LayerPanel(
                     modifier = Modifier.weight(1f).padding(start = 5.dp)
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
-                    LayerMiniButton("↑") { onAction(element.id, "up") }
-                    LayerMiniButton("↓") { onAction(element.id, "down") }
-                    LayerMiniButton(if (element.visible) "◉" else "○") { onAction(element.id, "hide") }
+                    LayerMiniButton(if (element.visible) "●" else "○") { onAction(element.id, "hide") }
                     LayerMiniButton(if (element.locked) "⌑" else "□") { onAction(element.id, "lock") }
-                    LayerMiniButton("×") { onAction(element.id, "delete") }
+                    LayerMiniButton("↑") { onAction(element.id, "front") }
+                    LayerMiniButton("↓") { onAction(element.id, "back") }
                 }
             }
         }
