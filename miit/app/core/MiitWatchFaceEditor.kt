@@ -2264,7 +2264,7 @@ private fun FullPreview(
         ) {
             WatchCanvasV2(
                 elements = elements, selectedId = 0, profile = profile, display = null, device = null,
-                referencePath = null, referenceOpacity = 0f, metadataOnly = false, onSelect = {}, onMove = {}, brushMode = false
+                referencePath = null, referenceOpacity = 0f, metadataOnly = false, onSelect = {}, onMove = { _, _, _ -> }, brushMode = false
             )
         }
     }
