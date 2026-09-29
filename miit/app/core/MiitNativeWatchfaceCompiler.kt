@@ -46,6 +46,12 @@ object MiitNativeWatchfaceCompiler {
         aod: Boolean
     ): Result {
         require(target.width > 0 && target.height > 0) { "Invalid watch-face target size" }
+        require(
+            (target.width == 192 && target.height == 490) ||
+                (target.width == 212 && target.height == 520)
+        ) {
+            "Unsupported watch-face target " + target.width + "×" + target.height
+        }
         val warnings = mutableListOf<String>()
 
         if (target.width != 192 || target.height != 490) {
