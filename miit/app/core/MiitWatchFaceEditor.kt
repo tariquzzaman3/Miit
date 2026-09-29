@@ -1483,6 +1483,7 @@ private fun livePreview(type: EditorElementType, device: BandDevice?): String = 
     EditorElementType.ANALOG_CLOCK -> ""
     EditorElementType.ARC_PROGRESS -> ""
     EditorElementType.LINE_PROGRESS -> ""
+    EditorElementType.BRUSH -> ""
     EditorElementType.CONTAINER -> ""
     EditorElementType.ANALOG_HAND -> ""
     EditorElementType.CLOCK_FACE -> ""
