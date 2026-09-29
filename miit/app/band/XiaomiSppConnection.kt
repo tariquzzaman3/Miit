@@ -267,7 +267,30 @@ class XiaomiSppConnection(
             onEvent("Xiaomi command: protobuf parse failed bytes=${commandBody.size}")
             return
         }
-        onEvent("Xiaomi command: type=${parsed.type} subtype=${parsed.subtype}")
+        onEvent("Xiaomi command: type=" + parsed.type + " subtype=" + parsed.subtype)
+
+        if (parsed.type == XiaomiCommandParser.TYPE_WATCHFACE &&
+            parsed.subtype == XiaomiCommandParser.WATCHFACE_INSTALL
+        ) {
+            when (parsed.installStatus) {
+                0 -> requestWatchfaceUploadStart()
+                null -> finishWatchfaceInstall(false, "Band returned no install status")
+                else -> finishWatchfaceInstall(false, "Band rejected the watchface: status " + parsed.installStatus)
+            }
+        }
+
+        if (parsed.type == XiaomiCommandParser.TYPE_DATA_UPLOAD &&
+            parsed.subtype == XiaomiCommandParser.DATA_UPLOAD_START
+        ) {
+            when {
+                parsed.uploadStatus != null && parsed.uploadStatus != 0 ->
+                    finishWatchfaceInstall(false, "Band rejected upload request: status " + parsed.uploadStatus)
+                parsed.uploadResumePosition != null && parsed.uploadResumePosition != 0 ->
+                    finishWatchfaceInstall(false, "Band requested an unsupported upload resume position")
+                else -> startWatchfaceBulkUpload(parsed.uploadChunkSize ?: 2048)
+            }
+        }
+
         if (parsed.battery != null || parsed.batteryState != null || parsed.charging != null ||
             parsed.firmware != null || parsed.model != null || parsed.hardware != null ||
             parsed.serialNumber != null
@@ -304,6 +327,98 @@ class XiaomiSppConnection(
         auth?.start()
     }
 
+    private fun requestWatchfaceUploadStart() {
+        val bytes = watchfaceInstallBytes ?: run {
+            finishWatchfaceInstall(false, "Watchface upload data disappeared")
+            return
+        }
+        val md5 = java.security.MessageDigest.getInstance("MD5").digest(bytes)
+        val sent = sendProtoCommand(
+            "watchface upload request",
+            XiaomiCommandParser.uploadWatchfaceStart(md5, bytes.size)
+        )
+        if (!sent) finishWatchfaceInstall(false, "Could not request watchface upload")
+    }
+
+    private fun startWatchfaceBulkUpload(deviceChunkSize: Int) {
+        val bytes = watchfaceInstallBytes ?: run {
+            finishWatchfaceInstall(false, "Watchface upload data disappeared")
+            return
+        }
+        val id = watchfaceInstallId ?: run {
+            finishWatchfaceInstall(false, "Watchface upload ID disappeared")
+            return
+        }
+        val chunkSize = deviceChunkSize.coerceIn(256, 16 * 1024)
+        val md5 = java.security.MessageDigest.getInstance("MD5").digest(bytes)
+
+        Thread({
+            try {
+                val packet = ByteArray(2 + 16 + 4 + bytes.size + 4)
+                packet[0] = 0
+                packet[1] = XiaomiCommandParser.DATA_UPLOAD_WATCHFACE.toByte()
+                md5.copyInto(packet, 2)
+                putU32le(packet, 18, bytes.size)
+                bytes.copyInto(packet, 22)
+
+                val crc = CRC32()
+                crc.update(packet, 0, 22 + bytes.size)
+                putU32le(packet, 22 + bytes.size, crc.value.toInt())
+
+                val partSize = chunkSize - 4
+                val totalParts = (packet.size + partSize - 1) / partSize
+                if (totalParts <= 0 || totalParts > 0xFFFF) {
+                    finishWatchfaceInstall(false, "Watchface package is too large for the Band upload protocol")
+                    return@Thread
+                }
+
+                onEvent("Xiaomi watchface install: uploading " + totalParts + " parts")
+                for (part in 0 until totalParts) {
+                    val start = part * partSize
+                    val end = minOf(start + partSize, packet.size)
+                    val chunk = ByteArray(4 + end - start)
+                    putU16le(chunk, 0, totalParts)
+                    putU16le(chunk, 2, part + 1)
+                    packet.copyInto(chunk, 4, start, end)
+                    sendWatchfaceDataChunk(chunk)
+                    watchfaceInstallProgress?.invoke(kotlin.math.round((part + 1) * 100f / totalParts).toInt())
+                }
+
+                onEvent("Xiaomi watchface install: activating " + id)
+                val activated = sendProtoCommand(
+                    "activate installed watchface",
+                    XiaomiCommandParser.watchfaceSet(id)
+                )
+                if (!activated) {
+                    finishWatchfaceInstall(false, "Could not activate the uploaded watchface")
+                    return@Thread
+                }
+                watchfaceInstallProgress?.invoke(100)
+                finishWatchfaceInstall(true, "Watchface uploaded and activation command sent")
+                sendProtoCommand("refresh watchface list", XiaomiCommandParser.watchfaceListGet())
+            } catch (t: Throwable) {
+                finishWatchfaceInstall(false, "Watchface upload failed: " + (t.message ?: t.javaClass.simpleName))
+            }
+        }, "Miit-Xiaomi-Watchface-Upload").start()
+    }
+
+    private fun sendWatchfaceDataChunk(payload: ByteArray) {
+        val raw = byteArrayOf(2, 1) + payload
+        val sequence = txSequence.getAndIncrement() and 0xFF
+        sendRaw(encodeV2(packetType = 3, sequence = sequence, payload = raw))
+        onEvent("Xiaomi SPPv2: sent watchface data chunk sequence=" + sequence + " bytes=" + payload.size)
+    }
+
+    private fun finishWatchfaceInstall(success: Boolean, message: String) {
+        val result = watchfaceInstallResult
+        watchfaceInstallId = null
+        watchfaceInstallBytes = null
+        watchfaceInstallProgress = null
+        watchfaceInstallResult = null
+        result?.invoke(success, message)
+        onEvent("Xiaomi watchface install: " + if (success) "success" else "failed" + " — " + message)
+    }
+
     private fun requestInitialRuntimeData() {
         val requests = listOf(
             "device info" to XiaomiCommandParser.systemGet(XiaomiCommandParser.SYSTEM_DEVICE_INFO),
@@ -335,6 +450,17 @@ class XiaomiSppConnection(
         onEvent("Xiaomi SPPv2: sent ACK sequence=$sequence")
     }
 
+    private fun putU16le(data: ByteArray, offset: Int, value: Int) {
+        data[offset] = value.toByte()
+        data[offset + 1] = (value ushr 8).toByte()
+    }
+
+    private fun putU32le(data: ByteArray, offset: Int, value: Int) {
+        data[offset] = value.toByte()
+        data[offset + 1] = (value ushr 8).toByte()
+        data[offset + 2] = (value ushr 16).toByte()
+        data[offset + 3] = (value ushr 24).toByte()
+    }
     private fun sendData(payload: ByteArray, encrypted: Boolean) {
         val opcode = if (encrypted) 2 else 1
         val raw = ByteArray(2 + payload.size)
