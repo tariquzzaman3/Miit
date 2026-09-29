@@ -42,6 +42,27 @@ object MiitWatchfaceSafety {
         val warnings: List<String>
     )
 
+    data class SupportedTarget(
+        val width: Int,
+        val height: Int,
+        val label: String
+    )
+
+    fun supportedTarget(model: String?, name: String?): SupportedTarget? {
+        val candidates = listOfNotNull(model, name)
+            .map { normalizeModel(it) }
+            .filter { it.isNotBlank() }
+        return candidates.firstNotNullOfOrNull { value ->
+            when {
+                value.matches(Regex("^(xiaomi )?smart band 10( nfc| ceramic edition| glimmer edition)?$")) ->
+                    SupportedTarget(212, 520, "Xiaomi Smart Band 10")
+                value.matches(Regex("^(xiaomi )?smart band 9( nfc)?$")) ->
+                    SupportedTarget(192, 490, "Xiaomi Smart Band 9")
+                else -> null
+            }
+        }
+    }
+
     fun inspectPackage(id: String, bytes: ByteArray): PackageReport {
         val errors = mutableListOf<String>()
         val warnings = mutableListOf<String>()
@@ -67,6 +88,9 @@ object MiitWatchfaceSafety {
             readU8(bytes, 2) == 0x34 &&
             readU8(bytes, 3) == 0x12
         if (!magicOk) errors += "Invalid Xiaomi watch-face magic header."
+
+        val storedId = readFixedUtf8(bytes, 0x28, 9)
+        if (storedId != id) errors += "Package ID does not match the install request."
 
         val faceCount = readU16(bytes, 0x1C)
         val sectionCount = readU16(bytes, 0x1E)
@@ -208,15 +232,10 @@ object MiitWatchfaceSafety {
             errors += "The Band is not fully connected and authenticated."
         }
 
-        val model = (device?.model ?: device?.name.orEmpty()).lowercase(Locale.US)
-        val expected = when {
-            "band 10" in model || "smart band 10" in model -> 212 to 520
-            "band 9" in model || "smart band 9" in model -> 192 to 490
-            else -> null
-        }
+        val expected = supportedTarget(device?.model, device?.name)
         if (expected == null) {
             errors += "Unsupported or ambiguous Band model. MIIT will never guess a target profile for installation."
-        } else if (report.width != expected.first || report.height != expected.second) {
+        } else if (report.width != expected.width || report.height != expected.height) {
             errors += "Package resolution does not match the connected Band."
         }
 
@@ -239,9 +258,9 @@ object MiitWatchfaceSafety {
                 errors += "MIIT cannot identify the currently active watch face."
             }
             val downloadable = device.watchfaces.count { it.canDelete }
-            if (expected?.first == 212 && downloadable >= 9) {
+            if (expected?.width == 212 && downloadable >= 9) {
                 errors += "Band 10 already reports 9 downloadable faces; free a market-face slot first."
-            } else if (expected?.first == 192 && downloadable >= 8) {
+            } else if (expected?.width == 192 && downloadable >= 8) {
                 warnings += "Band 9 is reporting many downloadable faces; its watch-face storage is limited."
             }
         }
@@ -265,6 +284,19 @@ object MiitWatchfaceSafety {
         MessageDigest.getInstance("SHA-256")
             .digest(bytes)
             .joinToString("") { "%02x".format(it) }
+
+    private fun normalizeModel(value: String): String =
+        value.lowercase(Locale.US)
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .trim()
+            .replace(Regex("\\s+"), " ")
+
+    private fun readFixedUtf8(bytes: ByteArray, offset: Int, length: Int): String? {
+        if (offset < 0 || offset + length > bytes.size) return null
+        var end = offset + length
+        while (end > offset && bytes[end - 1].toInt() == 0) end--
+        return bytes.copyOfRange(offset, end).toString(Charsets.UTF_8)
+    }
 
     private fun readPhoneBatteryPercent(context: Context): Int? {
         val battery = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager ?: return null
