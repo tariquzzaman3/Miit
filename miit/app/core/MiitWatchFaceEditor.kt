@@ -1749,9 +1749,17 @@ private fun EditorProgressLayer(
     onSelect: (Int) -> Unit = {},
     onMove: (Int, Float, Float) -> Unit = { _, _, _ -> }
 ) {
-    val value = when (element.preview) {
-        "Battery percent" -> (device?.batteryPercentage ?: 0).coerceIn(0, 100) / 100f
-        else -> 0f
+    val value = when (element.type) {
+        EditorElementType.BATTERY -> (device?.batteryPercentage ?: 86).coerceIn(0, 100) / 100f
+        EditorElementType.ARC_PROGRESS -> 0.76f
+        EditorElementType.LINE_PROGRESS -> 0.84f
+        EditorElementType.HEART_RATE -> ((device?.heartRate ?: 72).coerceIn(30, 220) - 30) / 190f
+        EditorElementType.SPO2 -> 0.98f
+        EditorElementType.STEPS -> 0.68f
+        EditorElementType.CALORIES -> 0.62f
+        EditorElementType.DISTANCE -> 0.58f
+        EditorElementType.SLEEP -> 0.78f
+        else -> 0.68f
     }
     Canvas(
         Modifier
@@ -2208,51 +2216,54 @@ private fun FullPreview(
     aod: Boolean,
     onBack: () -> Unit
 ) {
+    val now = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
     Column(
-        Modifier.fillMaxSize().background(Color.Black).statusBarsPadding(),
-        horizontalAlignment = Alignment.CenterHorizontally
+        Modifier.fillMaxSize().background(Color(0xFF050608)).statusBarsPadding()
     ) {
-        PhoneCameraSafeArea()
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .height(50.dp)
-                .background(Color(0xFF0E0F12))
-                .padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            ToolGlyph("‹", "Back to editor", onBack)
-            Text(
-                if (aod) "AOD Preview" else "Watch Face Preview",
-                color = Color.White,
-                fontSize = 14.sp,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                profile.width.toString() + "×" + profile.height.toString(),
-                color = Color(0xFF8A8F9A),
-                fontSize = 8.sp
-            )
+        Box(Modifier.fillMaxWidth().height(52.dp).background(Color(0xFF08090B))) {
+            PhoneCameraSafeArea()
+            Row(
+                Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ToolGlyph("‹", "Back to editor", onBack)
+                Column(Modifier.weight(1f).padding(horizontal = 5.dp)) {
+                    Text(if (aod) "Always-on preview" else "Watch-face preview", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    Text(profile.width.toString() + " × " + profile.height.toString() + " px • " + profile.source, color = Color(0xFF858B97), fontSize = 7.sp)
+                }
+                Text(now, color = Color.White, fontSize = 9.sp)
+                Text("  ▰ 78%", color = Color(0xFFC0C5CE), fontSize = 8.sp)
+            }
         }
         Box(
-            Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 12.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+                .background(Color(0xFF15171C), RoundedCornerShape(15.dp))
+                .border(1.dp, Color(0x223F4652), RoundedCornerShape(15.dp))
+                .padding(horizontal = 10.dp, vertical = 7.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(23.dp).background(Color(0xFF2C2F37), androidx.compose.foundation.shape.CircleShape), contentAlignment = Alignment.Center) {
+                    Text("M", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                }
+                Column(Modifier.weight(1f).padding(start = 7.dp)) {
+                    Text("MIIT • Preview mode", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (aod) "AOD preview • sample watch data" else "Preview • sample watch data", color = Color(0xFF8F95A0), fontSize = 7.sp)
+                }
+                Text("●", color = Color(0xFF58D68D), fontSize = 8.sp)
+            }
+        }
+        Box(
+            Modifier.fillMaxSize().weight(1f).padding(horizontal = 10.dp, vertical = 8.dp),
             contentAlignment = Alignment.Center
         ) {
             WatchCanvasV2(
-                elements = elements,
-                selectedId = 0,
-                profile = profile,
-                display = null,
-                device = null,
-                referencePath = null,
-                referenceOpacity = 1f,
-                metadataOnly = false,
-                onSelect = {},
-                onMove = { _, _, _ -> }
+                elements = elements, selectedId = 0, profile = profile, display = null, device = null,
+                referencePath = null, referenceOpacity = 0f, metadataOnly = false, onSelect = {}, onMove = {}, brushMode = false
             )
         }
     }
 }
+
 
 @Composable
 private fun PhoneCameraSafeArea() {
