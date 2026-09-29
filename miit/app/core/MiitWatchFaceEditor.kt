@@ -428,9 +428,10 @@ fun MiitWatchFaceEditor(
                 HorizontalToolBar(
                     selected = selectedTool,
                     onSelect = { tool ->
+                        val sameTool = selectedTool == tool
                         selectedTool = tool
                         colorMixerOpen = false
-                        toolOptionsOpen = !(toolOptionsOpen && selectedTool == tool)
+                        toolOptionsOpen = !(sameTool && toolOptionsOpen)
                     },
                     modifier = Modifier.fillMaxWidth().height(60.dp)
                 )
@@ -831,7 +832,7 @@ private fun ElementContextBar(
                                     .background(swatch, androidx.compose.foundation.shape.CircleShape)
                                     .border(
                                         1.dp,
-                                        if (android.graphics.Color.colorToArgb(swatch.toArgb()) == android.graphics.Color.colorToArgb(element.color.toArgb()))
+                                        if (swatch.toArgb() == element.color.toArgb())
                                             Color.White else Color.Transparent,
                                         androidx.compose.foundation.shape.CircleShape
                                     )
