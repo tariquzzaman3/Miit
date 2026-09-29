@@ -68,10 +68,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.miit.app.band.BandDevice
 import com.miit.app.band.BandDisplay
+import org.json.JSONArray
+import org.json.JSONObject
 
 private enum class ToolCategory(val icon: String, val title: String) {
     ADD("＋", "Add"),
@@ -230,6 +234,202 @@ fun MiitWatchFaceEditor(
         }
     }
 
+    fun buildAiContext(): String {
+        val root = JSONObject()
+            .put(
+                "target",
+                JSONObject()
+                    .put("width", profile.width)
+                    .put("height", profile.height)
+                    .put("model", profile.source)
+            )
+            .put("selectedId", if (selectedId == 0) JSONObject.NULL else selectedId)
+        val layerArray = JSONArray()
+        elements.forEach { element ->
+            layerArray.put(
+                JSONObject()
+                    .put("id", element.id)
+                    .put("type", element.type.name)
+                    .put("name", elementDisplayName(element))
+                    .put("preview", element.preview)
+                    .put("x", element.x)
+                    .put("y", element.y)
+                    .put("width", element.width)
+                    .put("height", element.height)
+                    .put("size", element.size)
+                    .put("rotation", element.rotation)
+                    .put("color", String.format(java.util.Locale.US, "#%08X", element.color.toArgb()))
+                    .put("bold", element.bold)
+                    .put("alignment", element.alignment)
+                    .put("filled", element.filled)
+                    .put("visible", element.visible)
+                    .put("locked", element.locked)
+            )
+        }
+        return root.put("layers", layerArray).toString()
+    }
+
+    fun aiDataElementType(value: String?): EditorElementType? {
+        val type = value?.trim()?.lowercase().orEmpty()
+        return when {
+            "heart" in type -> EditorElementType.HEART_RATE
+            "spo" in type -> EditorElementType.SPO2
+            "step" in type -> EditorElementType.STEPS
+            "battery" in type -> EditorElementType.BATTERY
+            "calorie" in type -> EditorElementType.CALORIES
+            "distance" in type -> EditorElementType.DISTANCE
+            "sleep" in type -> EditorElementType.SLEEP
+            "weather" in type -> EditorElementType.WEATHER
+            "date" in type -> EditorElementType.DATE
+            "weekday" in type -> EditorElementType.WEEKDAY
+            "analog" in type -> EditorElementType.ANALOG_CLOCK
+            "time" in type -> EditorElementType.TIME
+            "digital" in type || "number" in type -> EditorElementType.DIGITAL_NUMBER
+            else -> null
+        }
+    }
+
+    fun applyAiPlan(plan: MiitAiPlan): Int {
+        val operations = plan.operations.filter { operation ->
+            operation.op.lowercase() in setOf(
+                "move", "resize", "rotate", "color", "style", "delete",
+                "front", "back", "add_text", "add_data", "arrange_grid", "center_selected"
+            )
+        }
+        if (operations.isEmpty()) return 0
+        snapshotBeforeChange()
+        var touchedId = selectedId
+        var applied = 0
+
+        fun targetFor(operation: MiitAiOperation): Int = operation.id ?: selectedId
+        fun applyTo(id: Int, transform: (EditorElement) -> EditorElement) {
+            val index = elements.indexOfFirst { it.id == id }
+            if (index < 0 || elements[index].locked) return
+            elements[index] = transform(elements[index])
+            touchedId = id
+            applied++
+        }
+
+        operations.forEach { operation ->
+            when (operation.op.lowercase()) {
+                "move" -> applyTo(targetFor(operation)) { current ->
+                    current.copy(
+                        x = (operation.x ?: current.x).coerceIn(0f, 100f),
+                        y = (operation.y ?: current.y).coerceIn(0f, 100f)
+                    )
+                }
+                "resize" -> applyTo(targetFor(operation)) { current ->
+                    current.copy(
+                        width = (operation.width ?: current.width).coerceIn(10f, 180f),
+                        height = (operation.height ?: current.height).coerceIn(10f, 180f)
+                    )
+                }
+                "rotate" -> applyTo(targetFor(operation)) { current ->
+                    current.copy(rotation = normalizeAngle(operation.rotation ?: current.rotation))
+                }
+                "color" -> applyTo(targetFor(operation)) { current ->
+                    val parsed = runCatching { android.graphics.Color.parseColor(operation.color ?: "#FFFFFF") }.getOrDefault(current.color.toArgb())
+                    Color(parsed)
+                        .copy(alpha = current.color.alpha)
+                        .let { current.copy(color = it) }
+                }
+                "style" -> applyTo(targetFor(operation)) { current ->
+                    current.copy(
+                        size = (operation.size ?: current.size).coerceIn(4f, 72f),
+                        bold = operation.bold ?: current.bold,
+                        alignment = operation.alignment?.takeIf { it in setOf("Left", "Center", "Right") } ?: current.alignment,
+                        filled = operation.filled ?: current.filled
+                    )
+                }
+                "delete" -> {
+                    val id = targetFor(operation)
+                    val index = elements.indexOfFirst { it.id == id }
+                    if (index >= 0 && !elements[index].locked) {
+                        elements.removeAt(index)
+                        touchedId = elements.firstOrNull()?.id ?: 0
+                        applied++
+                    }
+                }
+                "front", "back" -> {
+                    val id = targetFor(operation)
+                    val index = elements.indexOfFirst { it.id == id }
+                    if (index >= 0 && !elements[index].locked) {
+                        val item = elements.removeAt(index)
+                        if (operation.op.lowercase() == "front") elements += item else elements.add(0, item)
+                        touchedId = id
+                        applied++
+                    }
+                }
+                "center_selected" -> applyTo(targetFor(operation)) { current -> current.copy(x = 50f, y = 50f) }
+                "add_text" -> {
+                    val id = nextId++
+                    val text = operation.text?.take(80).orEmpty().ifBlank { "New text" }
+                    val color = runCatching {
+                        android.graphics.Color.parseColor(operation.color ?: "#FFFFFFFF")
+                    }.getOrDefault(Color.White.toArgb())
+                    elements += EditorElement(
+                        id = id,
+                        type = EditorElementType.TEXT,
+                        preview = text,
+                        x = (operation.x ?: 50f).coerceIn(0f, 100f),
+                        y = (operation.y ?: 50f).coerceIn(0f, 100f),
+                        size = (operation.size ?: 20f).coerceIn(8f, 72f),
+                        width = (operation.width ?: 76f).coerceIn(10f, 180f),
+                        height = (operation.height ?: 55f).coerceIn(10f, 180f),
+                        color = Color(color),
+                        bold = operation.bold ?: false,
+                        alignment = operation.alignment?.takeIf { it in setOf("Left", "Center", "Right") } ?: "Center"
+                    )
+                    touchedId = id
+                    applied++
+                }
+                "add_data" -> {
+                    val type = aiDataElementType(operation.dataType)
+                    if (type != null) {
+                        val id = nextId++
+                        elements += EditorElement(
+                            id = id,
+                            type = type,
+                            preview = livePreview(type, device),
+                            x = (operation.x ?: 50f).coerceIn(0f, 100f),
+                            y = (operation.y ?: 50f).coerceIn(0f, 100f),
+                            size = (operation.size ?: 18f).coerceIn(8f, 60f),
+                            width = (operation.width ?: 76f).coerceIn(10f, 180f),
+                            height = (operation.height ?: 55f).coerceIn(10f, 180f),
+                            color = runCatching { Color(android.graphics.Color.parseColor(operation.color ?: "#FFFFFFFF")) }.getOrDefault(Color.White)
+                        )
+                        touchedId = id
+                        applied++
+                    }
+                }
+                "arrange_grid" -> {
+                    val candidates = elements.filter {
+                        it.visible && !it.locked && it.type !in setOf(
+                            EditorElementType.ANALOG_CLOCK, EditorElementType.ANALOG_HAND,
+                            EditorElementType.CLOCK_FACE, EditorElementType.BRUSH, EditorElementType.IMAGE
+                        )
+                    }
+                    val columns = if (candidates.size < 2) 1 else 2
+                    candidates.forEachIndexed { index, candidate ->
+                        val targetX = if (columns == 1) 50f else if (index % columns == 0) 28f else 72f
+                        val targetY = 24f + (index / columns) * 15f
+                        val elementIndex = elements.indexOfFirst { it.id == candidate.id }
+                        if (elementIndex >= 0) {
+                            elements[elementIndex] = candidate.copy(
+                                x = targetX.coerceIn(8f, 92f),
+                                y = targetY.coerceIn(8f, 92f)
+                            )
+                            touchedId = candidate.id
+                            applied++
+                        }
+                    }
+                }
+            }
+        }
+        selectedId = touchedId
+        selectedTool = toolForElement(elements.firstOrNull { it.id == selectedId }?.type)
+        return applied
+    }
     fun addElement(type: EditorElementType) {
         snapshotBeforeChange()
         if (type == EditorElementType.ANALOG_CLOCK) {
@@ -292,6 +492,48 @@ fun MiitWatchFaceEditor(
         }
     }
 
+    if (aiOpen) {
+        AiAssistantDialog(
+            messages = aiMessages,
+            prompt = aiPrompt,
+            busy = aiBusy,
+            provider = MiitSettingsStore.aiProvider(context),
+            hasKey = MiitSettingsStore.aiApiKey(context).isNotBlank(),
+            onPromptChange = { aiPrompt = it },
+            onClose = { aiOpen = false },
+            onSuggestion = { suggestion -> aiPrompt = suggestion },
+            onSend = { request ->
+                val trimmed = request.trim()
+                if (trimmed.isNotBlank() && !aiBusy) {
+                    aiMessages += AiChatMessage(true, trimmed)
+                    aiPrompt = ""
+                    aiBusy = true
+                    aiScope.launch {
+                        val history = aiMessages.takeLast(8).map {
+                            (if (it.user) "User: " else "MIIT AI: ") + it.text
+                        }
+                        val result = withContext(Dispatchers.IO) {
+                            MiitAiClient.run(
+                                providerSetting = MiitSettingsStore.aiProvider(context),
+                                apiKey = MiitSettingsStore.aiApiKey(context),
+                                prompt = trimmed,
+                                contextJson = buildAiContext(),
+                                history = history.dropLast(1)
+                            )
+                        }
+                        result.onSuccess { plan ->
+                            val applied = applyAiPlan(plan)
+                            val tail = if (applied > 0) " Applied $applied layer change" + if (applied == 1) "." else "s." else " No safe layer change was needed."
+                            aiMessages += AiChatMessage(false, plan.message + tail)
+                        }.onFailure { error ->
+                            aiMessages += AiChatMessage(false, "I couldn't apply that yet: " + (error.message ?: error.javaClass.simpleName))
+                        }
+                        aiBusy = false
+                    }
+                }
+            }
+        )
+    }
     if (propertiesOpen) {
         val selected = elements.firstOrNull { it.id == selectedId }
         if (selected != null) {
@@ -548,7 +790,10 @@ fun MiitWatchFaceEditor(
                                 ).show()
                             }
                     },
-                    onAi = { onAction("aiArrange") },
+                    onAi = {
+                        aiOpen = true
+                        selectedTool = ToolCategory.AI
+                    },
                     onLayerAction = { action ->
                         if (selectedId != 0) applyLayerAction(selectedId, action)
                     },
@@ -1140,9 +1385,7 @@ private fun SubToolBar(
         ToolCategory.STYLE -> listOf(SubAction("W", "White") { onModifySelected { it.copy(color = Color.White) } }, SubAction("B", "Blue") { onModifySelected { it.copy(color = Color(0xFF55B7FF)) } }, SubAction("Y", "Yellow") { onModifySelected { it.copy(color = Color(0xFFFFD54F)) } }, SubAction("R", "Red") { onModifySelected { it.copy(color = Color(0xFFFF6B6B)) } }, SubAction("B+", "Bold") { onModifySelected { it.copy(bold = !it.bold) } })
         ToolCategory.AOD -> listOf(SubAction(if (aodEnabled) "●" else "○", if (aodEnabled) "AOD on" else "AOD off") { onAodChange(!aodEnabled) })
         ToolCategory.AI -> listOf(
-            SubAction("✧", "Arrange") { onAi() },
-            SubAction("◎", "Center") { onAi() },
-            SubAction("✓", "Clean") { onAi() }
+            SubAction("✧", "Assistant") { onAi() }
         )
         ToolCategory.EXPORT -> listOf(
             SubAction("⇩", "Save") { onExport() },
