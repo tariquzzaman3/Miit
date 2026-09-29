@@ -264,8 +264,36 @@ private fun MiitApp() {
                 onAction = { action ->
                     when (action) {
                         "save" -> Toast.makeText(context, "Project saved on this phone.", Toast.LENGTH_SHORT).show()
-                        "export" -> Toast.makeText(context, "Export compiler stage is next.", Toast.LENGTH_SHORT).show()
-                        "band" -> Toast.makeText(context, "Direct installation is not implemented yet.", Toast.LENGTH_LONG).show()
+                        "export" -> Toast.makeText(context, "Native .face packaging is available through Install.", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onInstallToBand = { compiled ->
+                    Toast.makeText(
+                        context,
+                        "Uploading " + compiled.name + " to " + (connectedBand?.name ?: "Xiaomi Band") + "…",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    var lastShownBucket = -1
+                    val started = scanner.installWatchface(
+                        id = compiled.id,
+                        bytes = compiled.bytes,
+                        onProgress = { progress ->
+                            val bucket = progress / 20
+                            if (progress == 0 || progress == 100 || bucket > lastShownBucket) {
+                                lastShownBucket = bucket
+                                Toast.makeText(context, "Band upload: " + progress + "%", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onResult = { success, message ->
+                            Toast.makeText(
+                                context,
+                                if (success) "✓ " + message else "Band install failed: " + message,
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    )
+                    if (!started) {
+                        Toast.makeText(context, "The Band connection is not ready for installation.", Toast.LENGTH_LONG).show()
                     }
                 }
             )
