@@ -612,96 +612,19 @@ fun MiitWatchFaceEditor(
                             .align(Alignment.BottomCenter)
                             .padding(bottom = 8.dp)
                     )
-                }
-            }
-        }
-
-        // MIDDLE — actual editor display.
-        Box(Modifier.fillMaxSize().weight(1f)) {
-            WatchCanvasV2(
-                elements = elements,
-                selectedId = selectedId,
-                profile = profile,
-                display = display,
-                device = device,
-                referencePath = referencePath,
-                referenceOpacity = referenceOpacity,
-                metadataOnly = display != null,
-                onSelect = { selectedId = it },
-                onMove = { id, dx, dy ->
-                    val index = elements.indexOfFirst { it.id == id }
-                    if (index >= 0 && !elements[index].locked) {
-                        val current = elements[index]
-                        elements[index] = current.copy(
-                            x = (current.x + dx).coerceIn(0f, 100f),
-                            y = (current.y + dy).coerceIn(0f, 100f)
+                    if (layersOpen) {
+                        LayerPanel(
+                            elements = elements,
+                            selectedId = selectedId,
+                            onSelect = { selectedId = it },
+                            onAction = { id, action -> applyLayerAction(id, action) },
+                            onClose = { layersOpen = false },
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .width(214.dp)
                         )
                     }
-                },
-                brushMode = selectedTool == ToolCategory.BRUSH,
-                brushSize = brushSize,
-                brushColor = brushColor,
-                onBrushStroke = { points ->
-                    if (points.size >= 2) {
-                        snapshotBeforeChange()
-                        val path = points.joinToString(";") { "${it.first},${it.second}" }
-                        val first = points.first()
-                        val id = nextId++
-                        elements += EditorElement(
-                            id = id,
-                            type = EditorElementType.BRUSH,
-                            preview = "",
-                            x = first.first,
-                            y = first.second,
-                            size = brushSize,
-                            width = 100f,
-                            height = 100f,
-                            color = brushColor,
-                            thickness = brushSize,
-                            brushPath = path
-                        )
-                        selectedId = id
-                    }
-                },
-                onResize = { id, dx, dy ->
-                    val index = elements.indexOfFirst { it.id == id }
-                    if (index >= 0 && !elements[index].locked) {
-                        val current = elements[index]
-                        val newWidth = (current.width + dx / 1.66f).coerceIn(10f, 180f)
-                        val newHeight = (current.height + dy / 4.08f).coerceIn(10f, 180f)
-                        elements[index] = current.copy(width = newWidth, height = newHeight)
-                    }
-                },
-                onRotate = { id, delta ->
-                    val index = elements.indexOfFirst { it.id == id }
-                    if (index >= 0 && !elements[index].locked) {
-                        elements[index] = elements[index].copy(rotation = normalizeAngle(elements[index].rotation + delta))
-                    }
-                },
-                onDeleteElement = { id ->
-                    snapshotBeforeChange()
-                    elements.removeAll { it.id == id }
-                    if (selectedId == id) selectedId = 0
-                    colorMixerOpen = false
-                },
-                onInteractionEnd = {
-                    selectedId = 0
-                    colorMixerOpen = false
                 }
-            )
-            LayerDockButton(
-                onClick = { layersOpen = !layersOpen },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 10.dp)
-            )
-            if (layersOpen) {
-                LayerPanel(
-                    elements = elements,
-                    selectedId = selectedId,
-                    onSelect = { selectedId = it },
-                    onAction = { id, action -> applyLayerAction(id, action) },
-                    onClose = { layersOpen = false },
-                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(194.dp)
-                )
             }
         }
 
