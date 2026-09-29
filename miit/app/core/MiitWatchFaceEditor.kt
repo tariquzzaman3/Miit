@@ -141,8 +141,9 @@ fun MiitWatchFaceEditor(
         }
     }
     var nextId by remember(display?.stableId, savedProject?.absolutePath) { mutableIntStateOf(elements.maxOfOrNull { it.id }?.plus(1) ?: 1) }
-    var selectedId by remember { mutableIntStateOf(elements.firstOrNull()?.id ?: 0) }
+    var selectedId by remember { mutableIntStateOf(0) }
     var selectedTool by remember { mutableStateOf(ToolCategory.ADD) }
+    var toolOptionsOpen by remember { mutableStateOf(false) }
     var previewMode by remember { mutableStateOf(false) }
     var aodEnabled by remember(savedProject?.absolutePath) { mutableStateOf(savedProject?.let { WatchfaceProjectStore.readAod(it) } ?: false) }
     var editingTextId by remember { mutableIntStateOf(0) }
@@ -244,6 +245,8 @@ fun MiitWatchFaceEditor(
             size = if (type == EditorElementType.TIME) 36f else 18f
         )
         selectedId = id
+        toolOptionsOpen = false
+        colorMixerOpen = false
         if (type == EditorElementType.TEXT) editingTextId = id
         if (type == EditorElementType.DIGITAL_NUMBER) sourcePicker = true
         if (type == EditorElementType.IMAGE) {
@@ -357,83 +360,165 @@ fun MiitWatchFaceEditor(
             }
         }
 
-        // BAR 1 — main tools, horizontally swipeable.
-        HorizontalToolBar(
-            selected = selectedTool,
-            onSelect = { selectedTool = it },
-            modifier = Modifier.fillMaxWidth().height(66.dp)
-        )
-
-        // BAR 2 — contextual object controls for pen, shapes and text.
         val selectedElement = elements.firstOrNull { it.id == selectedId }
-        if (selectedElement != null && isContextualElement(selectedElement.type)) {
-            ElementContextBar(
-                element = selectedElement,
-                colorMixerOpen = colorMixerOpen,
-                onToggleColorMixer = { colorMixerOpen = !colorMixerOpen },
-                onColorChange = { color ->
-                    val index = elements.indexOfFirst { it.id == selectedElement.id }
-                    if (index >= 0 && !selectedElement.locked) elements[index] = selectedElement.copy(color = color)
-                },
-                onOpacityChange = { alpha ->
-                    val index = elements.indexOfFirst { it.id == selectedElement.id }
-                    if (index >= 0 && !selectedElement.locked) elements[index] = selectedElement.copy(color = selectedElement.color.copy(alpha = alpha))
-                },
-                onFillToggle = {
-                    val index = elements.indexOfFirst { it.id == selectedElement.id }
-                    if (index >= 0 && !selectedElement.locked) elements[index] = selectedElement.copy(filled = !selectedElement.filled)
-                },
-                onRotate = { delta ->
-                    val index = elements.indexOfFirst { it.id == selectedElement.id }
-                    if (index >= 0 && !selectedElement.locked) elements[index] = selectedElement.copy(rotation = normalizeAngle(selectedElement.rotation + delta))
-                },
-                onDelete = {
-                    snapshotBeforeChange()
-                    elements.removeAll { it.id == selectedElement.id }
-                    selectedId = elements.firstOrNull()?.id ?: 0
-                    colorMixerOpen = false
+        val contextualSelection = selectedElement?.takeIf { isContextualElement(it.type) }
+
+        // PicsArt-inspired chrome:
+        // • normal state: one persistent tool rail
+        // • active element: contextual rail becomes line 1, tool rail shifts to line 2
+        // • tool palettes float over the canvas instead of permanently consuming another row
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(if (contextualSelection != null) 116.dp else 60.dp)
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomStart)
+            ) {
+                contextualSelection?.let { element ->
+                    ElementContextBar(
+                        element = element,
+                        colorMixerOpen = colorMixerOpen,
+                        onToggleColorMixer = { colorMixerOpen = !colorMixerOpen },
+                        onColorChange = { color ->
+                            val index = elements.indexOfFirst { it.id == element.id }
+                            if (index >= 0 && !element.locked) {
+                                elements[index] = element.copy(color = color)
+                            }
+                        },
+                        onOpacityChange = { alpha ->
+                            val index = elements.indexOfFirst { it.id == element.id }
+                            if (index >= 0 && !element.locked) {
+                                elements[index] = element.copy(color = element.color.copy(alpha = alpha))
+                            }
+                        },
+                        onFillToggle = {
+                            val index = elements.indexOfFirst { it.id == element.id }
+                            if (index >= 0 && !element.locked) {
+                                elements[index] = element.copy(filled = !element.filled)
+                            }
+                        },
+                        onSizeChange = { size ->
+                            val index = elements.indexOfFirst { it.id == element.id }
+                            if (index >= 0 && !element.locked) {
+                                elements[index] = element.copy(
+                                    size = size,
+                                    thickness = if (element.type == EditorElementType.BRUSH) size else element.thickness
+                                )
+                            }
+                        },
+                        onModify = { transform ->
+                            val index = elements.indexOfFirst { it.id == element.id }
+                            if (index >= 0 && !element.locked) {
+                                elements[index] = transform(elements[index])
+                            }
+                        },
+                        onDelete = {
+                            snapshotBeforeChange()
+                            elements.removeAll { it.id == element.id }
+                            selectedId = 0
+                            colorMixerOpen = false
+                            toolOptionsOpen = false
+                        }
+                    )
                 }
-            )
-        } else {
-            SubToolBar(
-                category = selectedTool,
-                selected = selectedElement,
-                aodEnabled = aodEnabled,
-                onAodChange = { aodEnabled = it },
-                brushSize = brushSize,
-                brushColor = brushColor,
-                onBrushSizeChange = { brushSize = it },
-                onBrushColorChange = { brushColor = it },
-                onAdd = ::addElement,
-                selectHandByName = { hand ->
-                    val idx = elements.indexOfFirst { it.type == EditorElementType.ANALOG_HAND && it.handKind == hand }
-                    if (idx >= 0) selectedId = elements[idx].id
-                },
-                onAddSource = { name ->
-                    val source = MiCreateCatalog.band9Sources.firstOrNull { it.name == name }
-                    val id = nextId++
-                    elements += EditorElement(id, EditorElementType.DIGITAL_NUMBER, source?.name ?: name, 50f, 50f, 22f, format = source?.idFprj ?: "0")
-                    selectedId = id
-                },
-                onPickImage = {
-                    val id = if (selectedId != 0) selectedId else nextId++
-                    if (selectedId == 0) { elements += EditorElement(id, EditorElementType.IMAGE, "", 50f, 50f, 24f); selectedId = id }
-                    imageTarget = id
-                    imagePicker.launch(arrayOf("image/*"))
-                },
-                onReference = { imageTarget = -1; imagePicker.launch(arrayOf("image/*")) },
-                onModifySelected = { transform ->
-                    val index = elements.indexOfFirst { it.id == selectedId }
-                    if (index >= 0 && !elements[index].locked) elements[index] = transform(elements[index])
-                },
-                onEditText = { if (selectedElement?.type == EditorElementType.TEXT) editingTextId = selectedId },
-                onSourcePicker = { sourcePicker = true },
-                onExport = { onAction("export") },
-                onBand = { onAction("band") },
-                onAi = { onAction("aiArrange") },
-                onLayerAction = { action -> layersOpen = true; applyLayerAction(selectedId, action) },
-                modifier = Modifier.fillMaxWidth().height(58.dp)
-            )
+
+                HorizontalToolBar(
+                    selected = selectedTool,
+                    onSelect = { tool ->
+                        selectedTool = tool
+                        colorMixerOpen = false
+                        toolOptionsOpen = !(toolOptionsOpen && selectedTool == tool)
+                    },
+                    modifier = Modifier.fillMaxWidth().height(60.dp)
+                )
+            }
+
+            if (contextualSelection == null && toolOptionsOpen) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .offset(y = (-58).dp)
+                        .padding(horizontal = 6.dp)
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .background(
+                            Color(0xF01A1B20),
+                            RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
+                        )
+                        .border(1.dp, Color(0x223F4652), RoundedCornerShape(16.dp))
+                ) {
+                    SubToolBar(
+                        category = selectedTool,
+                        selected = selectedElement,
+                        aodEnabled = aodEnabled,
+                        onAodChange = { aodEnabled = it },
+                        brushSize = brushSize,
+                        brushColor = brushColor,
+                        onBrushSizeChange = { brushSize = it },
+                        onBrushColorChange = { brushColor = it },
+                        onAdd = ::addElement,
+                        selectHandByName = { hand ->
+                            val idx = elements.indexOfFirst {
+                                it.type == EditorElementType.ANALOG_HAND && it.handKind == hand
+                            }
+                            if (idx >= 0) selectedId = elements[idx].id
+                        },
+                        onAddSource = { name ->
+                            val source = MiCreateCatalog.band9Sources.firstOrNull { it.name == name }
+                            val id = nextId++
+                            elements += EditorElement(
+                                id,
+                                EditorElementType.DIGITAL_NUMBER,
+                                source?.name ?: name,
+                                50f,
+                                50f,
+                                22f,
+                                format = source?.idFprj ?: "0"
+                            )
+                            selectedId = id
+                            toolOptionsOpen = false
+                        },
+                        onPickImage = {
+                            val id = if (selectedId != 0) selectedId else nextId++
+                            if (selectedId == 0) {
+                                elements += EditorElement(id, EditorElementType.IMAGE, "", 50f, 50f, 24f)
+                                selectedId = id
+                            }
+                            imageTarget = id
+                            imagePicker.launch(arrayOf("image/*"))
+                            toolOptionsOpen = false
+                        },
+                        onReference = {
+                            imageTarget = -1
+                            imagePicker.launch(arrayOf("image/*"))
+                            toolOptionsOpen = false
+                        },
+                        onModifySelected = { transform ->
+                            val index = elements.indexOfFirst { it.id == selectedId }
+                            if (index >= 0 && !elements[index].locked) {
+                                elements[index] = transform(elements[index])
+                            }
+                        },
+                        onEditText = {
+                            if (selectedElement?.type == EditorElementType.TEXT) editingTextId = selectedId
+                        },
+                        onSourcePicker = { sourcePicker = true },
+                        onExport = { onAction("export") },
+                        onBand = { onAction("band") },
+                        onAi = { onAction("aiArrange") },
+                        onLayerAction = { action ->
+                            if (selectedId != 0) {
+                                layersOpen = true
+                                applyLayerAction(selectedId, action)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().height(56.dp)
+                    )
+                }
+            }
         }
 
         // MIDDLE — actual editor display.
@@ -501,8 +586,14 @@ fun MiitWatchFaceEditor(
                 onDeleteElement = { id ->
                     snapshotBeforeChange()
                     elements.removeAll { it.id == id }
-                    if (selectedId == id) selectedId = elements.firstOrNull()?.id ?: 0
+                    if (selectedId == id) selectedId = 0
                     colorMixerOpen = false
+                    toolOptionsOpen = false
+                },
+                onInteractionEnd = {
+                    selectedId = 0
+                    colorMixerOpen = false
+                    toolOptionsOpen = false
                 }
             )
             LayerDockButton(
@@ -521,21 +612,6 @@ fun MiitWatchFaceEditor(
             }
         }
 
-        // Lightweight selected-element strip; still icon-first.
-        SelectedElementBar(
-            selected = elements.firstOrNull { it.id == selectedId },
-            onChangeSize = { delta ->
-                val index = elements.indexOfFirst { it.id == selectedId }
-                if (index >= 0) elements[index] = elements[index].copy(size = (elements[index].size + delta).coerceIn(10f, 72f))
-            },
-            onDelete = {
-                elements.removeAll { it.id == selectedId }
-                selectedId = elements.firstOrNull()?.id ?: 0
-            },
-            onExport = { onAction("export") },
-            onBand = { onAction("band") },
-            onProperties = { propertiesOpen = true }
-        )
     }
 }
 
@@ -546,13 +622,18 @@ private fun HorizontalToolBar(
     modifier: Modifier
 ) {
     Row(
-        modifier.background(Color(0xFF202126)).horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp),
+        modifier
+            .background(Color(0xFF121317))
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        ToolCategory.values().filterNot { it == ToolCategory.LAYERS }.forEach { tool ->
-            ToolCell(tool.icon, tool.title, selected == tool, onClick = { onSelect(tool) })
-        }
+        ToolCategory.values()
+            .filterNot { it == ToolCategory.LAYERS }
+            .forEach { tool ->
+                ToolCell(tool.icon, tool.title, selected == tool, onClick = { onSelect(tool) })
+            }
     }
 }
 
@@ -586,53 +667,290 @@ private fun ElementContextBar(
     onColorChange: (Color) -> Unit,
     onOpacityChange: (Float) -> Unit,
     onFillToggle: () -> Unit,
-    onRotate: (Float) -> Unit,
+    onSizeChange: (Float) -> Unit,
+    onModify: (((EditorElement) -> EditorElement)) -> Unit,
     onDelete: () -> Unit
 ) {
-    val hsv = remember(element.id, element.color) { FloatArray(3).also { android.graphics.Color.colorToHSV(element.color.toArgb(), it) } }
+    val hsv = remember(element.id, element.color) {
+        FloatArray(3).also {
+            android.graphics.Color.colorToHSV(element.color.toArgb(), it)
+        }
+    }
     var hue by remember(element.id, element.color) { mutableStateOf(hsv[0]) }
     var saturation by remember(element.id, element.color) { mutableStateOf(hsv[1]) }
     var value by remember(element.id, element.color) { mutableStateOf(hsv[2]) }
-    fun applyColor() = onColorChange(Color.hsv(hue, saturation, value, element.color.alpha))
-    Column(Modifier.fillMaxWidth().background(Color(0xFF1A1B20))) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            ContextAction("Color", element.color, onToggleColorMixer)
-            ContextActionText("↻") { onRotate(15f) }
-            if (element.type in setOf(EditorElementType.CIRCLE, EditorElementType.RECTANGLE, EditorElementType.ROUNDED_RECTANGLE, EditorElementType.ELLIPSE, EditorElementType.TRIANGLE)) {
-                ContextActionText(if (element.filled) "Fill" else "Outline") { onFillToggle() }
+
+    fun applyColor() {
+        onColorChange(Color.hsv(hue, saturation, value, element.color.alpha))
+    }
+
+    val isShape = element.type in setOf(
+        EditorElementType.CIRCLE,
+        EditorElementType.RECTANGLE,
+        EditorElementType.ROUNDED_RECTANGLE,
+        EditorElementType.ELLIPSE,
+        EditorElementType.TRIANGLE
+    )
+    val isText = element.type == EditorElementType.TEXT
+    val isBrush = element.type == EditorElementType.BRUSH
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .background(Color(0xFF18191D))
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            ContextObjectChip(
+                icon = when {
+                    isBrush -> "✎"
+                    isText -> "T"
+                    isShape -> "◇"
+                    else -> "•"
+                },
+                label = element.type.name.replace('_', ' ')
+            )
+            ContextIcon(
+                icon = "◉",
+                label = "Color",
+                active = colorMixerOpen,
+                tint = element.color,
+                onClick = onToggleColorMixer
+            )
+            if (isShape) {
+                ContextIcon(
+                    icon = if (element.filled) "●" else "○",
+                    label = if (element.filled) "Fill" else "Stroke",
+                    active = element.filled,
+                    onClick = onFillToggle
+                )
             }
-            ContextActionText("×") { onDelete() }
+            if (isBrush) {
+                ContextIcon(
+                    icon = "⌁",
+                    label = "Size",
+                    active = false,
+                    onClick = {
+                        onSizeChange((element.thickness + 2f).coerceIn(2f, 40f))
+                    }
+                )
+            }
+            if (isText) {
+                ContextIcon(
+                    icon = "B",
+                    label = "Bold",
+                    active = element.bold,
+                    onClick = { onModify { it.copy(bold = !it.bold) } }
+                )
+                ContextIcon(
+                    icon = when (element.alignment) {
+                        "Left" -> "≪"
+                        "Right" -> "≫"
+                        else -> "≡"
+                    },
+                    label = "Align",
+                    active = false,
+                    onClick = {
+                        onModify {
+                            when (it.alignment) {
+                                "Left" -> it.copy(alignment = "Center")
+                                "Center" -> it.copy(alignment = "Right")
+                                else -> it.copy(alignment = "Left")
+                            }
+                        }
+                    }
+                )
+            }
+            ContextIcon(
+                icon = "↻",
+                label = "Rotate",
+                active = false,
+                onClick = { onModify { it.copy(rotation = normalizeAngle(it.rotation + 15f)) } }
+            )
+            ContextIcon(
+                icon = "⚙",
+                label = "Edit",
+                active = false,
+                onClick = { onModify { it } }
+            )
+            ContextIcon(
+                icon = "×",
+                label = "Delete",
+                active = false,
+                destructive = true,
+                onClick = onDelete
+            )
         }
+
         if (colorMixerOpen) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(28.dp).background(element.color, RoundedCornerShape(7.dp)))
-                Text("H", color = Color.White, fontSize = 8.sp, modifier = Modifier.padding(horizontal = 3.dp))
-                Slider(hue, { hue = it; applyColor() }, valueRange = 0f..360f, modifier = Modifier.weight(1f))
-                Text("S", color = Color.White, fontSize = 8.sp, modifier = Modifier.padding(horizontal = 3.dp))
-                Slider(saturation, { saturation = it; applyColor() }, valueRange = 0f..1f, modifier = Modifier.weight(1f))
-                Text("V", color = Color.White, fontSize = 8.sp, modifier = Modifier.padding(horizontal = 3.dp))
-                Slider(value, { value = it; applyColor() }, valueRange = 0f..1f, modifier = Modifier.weight(1f))
-            }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 1.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Opacity", color = Color.Gray, fontSize = 8.sp, modifier = Modifier.width(42.dp))
-                Slider(element.color.alpha, onOpacityChange, valueRange = 0f..1f, modifier = Modifier.weight(1f))
+            Column(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = (-52).dp)
+                    .padding(horizontal = 10.dp)
+                    .fillMaxWidth()
+                    .background(Color(0xF0202126), RoundedCornerShape(18.dp))
+                    .border(1.dp, Color(0x33454A57), RoundedCornerShape(18.dp))
+                    .padding(10.dp)
+            ) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        Modifier
+                            .size(30.dp)
+                            .background(element.color, RoundedCornerShape(9.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(9.dp))
+                    )
+                    Text(
+                        "Color mixer",
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        listOf(
+                            Color.White, Color.Black, Color(0xFFFF5B5B), Color(0xFFFFB547),
+                            Color(0xFFE5E76B), Color(0xFF58D68D), Color(0xFF55E6E6),
+                            Color(0xFF55B7FF), Color(0xFF9D7BFF), Color(0xFFFF75C3)
+                        ).forEach { swatch ->
+                            Box(
+                                Modifier
+                                    .size(18.dp)
+                                    .background(swatch, androidx.compose.foundation.shape.CircleShape)
+                                    .border(
+                                        1.dp,
+                                        if (android.graphics.Color.colorToArgb(swatch.toArgb()) == android.graphics.Color.colorToArgb(element.color.toArgb()))
+                                            Color.White else Color.Transparent,
+                                        androidx.compose.foundation.shape.CircleShape
+                                    )
+                                    .clickable {
+                                        val hsvValue = FloatArray(3)
+                                        android.graphics.Color.colorToHSV(swatch.toArgb(), hsvValue)
+                                        hue = hsvValue[0]
+                                        saturation = hsvValue[1]
+                                        value = hsvValue[2]
+                                        applyColor()
+                                    }
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(5.dp))
+                Text("Hue", color = Color(0xFF9EA3AE), fontSize = 8.sp)
+                Slider(
+                    value = hue,
+                    onValueChange = { hue = it; applyColor() },
+                    valueRange = 0f..360f,
+                    modifier = Modifier.fillMaxWidth().height(22.dp)
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("S", color = Color(0xFF9EA3AE), fontSize = 8.sp, modifier = Modifier.width(10.dp))
+                    Slider(
+                        value = saturation,
+                        onValueChange = { saturation = it; applyColor() },
+                        valueRange = 0f..1f,
+                        modifier = Modifier.weight(1f).height(22.dp)
+                    )
+                    Text("V", color = Color(0xFF9EA3AE), fontSize = 8.sp, modifier = Modifier.width(10.dp))
+                    Slider(
+                        value = value,
+                        onValueChange = { value = it; applyColor() },
+                        valueRange = 0f..1f,
+                        modifier = Modifier.weight(1f).height(22.dp)
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Opacity", color = Color(0xFF9EA3AE), fontSize = 8.sp, modifier = Modifier.width(42.dp))
+                    Slider(
+                        value = element.color.alpha,
+                        onValueChange = onOpacityChange,
+                        valueRange = 0f..1f,
+                        modifier = Modifier.weight(1f).height(22.dp)
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ContextAction(label: String, color: Color, onClick: () -> Unit) {
-    Row(Modifier.background(Color(0xFF25262C), RoundedCornerShape(9.dp)).clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(14.dp).background(color, RoundedCornerShape(4.dp)))
-        Text(label, color = Color.White, fontSize = 9.sp, modifier = Modifier.padding(start = 5.dp))
+private fun ContextObjectChip(icon: String, label: String) {
+    Row(
+        Modifier
+            .background(Color(0xFF25262C), RoundedCornerShape(12.dp))
+            .padding(horizontal = 9.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(21.dp)
+                .background(Color(0xFF31343C), RoundedCornerShape(7.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(icon, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        }
+        Text(
+            label,
+            color = Color(0xFFD6D9E0),
+            fontSize = 8.sp,
+            modifier = Modifier.padding(start = 6.dp)
+        )
     }
 }
 
 @Composable
-private fun ContextActionText(label: String, onClick: () -> Unit) {
-    Box(Modifier.background(Color(0xFF25262C), RoundedCornerShape(9.dp)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 7.dp)) { Text(label, color = Color.White, fontSize = 9.sp) }
+private fun ContextIcon(
+    icon: String,
+    label: String,
+    active: Boolean,
+    tint: Color = Color.White,
+    destructive: Boolean = false,
+    onClick: () -> Unit
+) {
+    Column(
+        Modifier
+            .width(48.dp)
+            .clickable(onClick = onClick)
+            .padding(vertical = 3.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            Modifier
+                .size(34.dp)
+                .background(
+                    if (active) Color(0xFF343843) else Color.Transparent,
+                    RoundedCornerShape(11.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                icon,
+                color = if (destructive) Color(0xFFFF6B6B) else tint,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        Text(
+            label,
+            color = if (destructive) Color(0xFFFF8282) else Color(0xFFA4A8B2),
+            fontSize = 7.sp,
+            maxLines = 1
+        )
+    }
 }
+
 @Composable
 private fun SubToolBar(
     category: ToolCategory,
@@ -908,18 +1226,39 @@ private fun ToolGlyph(icon: String, description: String, onClick: () -> Unit) {
 @Composable
 private fun ToolCell(icon: String, title: String, selected: Boolean, onClick: () -> Unit) {
     Column(
-        Modifier.width(58.dp).padding(vertical = 4.dp),
+        Modifier
+            .width(58.dp)
+            .padding(vertical = 4.dp)
+            .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
-            Modifier.size(36.dp)
-                .background(if (selected) Color(0xFF3E7BFF) else Color.Transparent, RoundedCornerShape(10.dp))
-                .clickable(onClick = onClick),
+            Modifier
+                .size(38.dp)
+                .background(
+                    if (selected) Color(0xFF343843) else Color.Transparent,
+                    RoundedCornerShape(13.dp)
+                )
+                .border(
+                    1.dp,
+                    if (selected) Color(0xFF8B7BFF) else Color.Transparent,
+                    RoundedCornerShape(13.dp)
+                ),
             contentAlignment = Alignment.Center
         ) {
-            Text(icon, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(
+                icon,
+                color = if (selected) Color.White else Color(0xFFD3D6DE),
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
-        Text(title, color = Color.LightGray, fontSize = 9.sp)
+        Text(
+            title,
+            color = if (selected) Color.White else Color(0xFF8E929B),
+            fontSize = 8.sp,
+            maxLines = 1
+        )
     }
 }
 
@@ -941,7 +1280,8 @@ private fun WatchCanvasV2(
     onBrushStroke: (List<Pair<Float, Float>>) -> Unit = {},
     onResize: (Int, Float, Float) -> Unit = { _, _, _ -> },
     onRotate: (Int, Float) -> Unit = { _, _ -> },
-    onDeleteElement: (Int) -> Unit = {}
+    onDeleteElement: (Int) -> Unit = {},
+    onInteractionEnd: () -> Unit = {}
 ) {
     Box(Modifier.fillMaxSize().background(Color(0xFF0D0E10)), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -990,7 +1330,8 @@ private fun WatchCanvasV2(
                         onMove = { id, dx, dy -> onMove(id, dx / 1.66f, dy / 4.08f) },
                         onResize = onResize,
                         onRotate = onRotate,
-                        onDelete = onDeleteElement
+                        onDelete = onDeleteElement,
+                        onInteractionEnd = onInteractionEnd
                     )
                 }
                 if (metadataOnly && display?.previewPath == null) {
@@ -1387,7 +1728,8 @@ private fun EditorSelectionOverlay(
     onMove: (Int, Float, Float) -> Unit,
     onResize: (Int, Float, Float) -> Unit,
     onRotate: (Int, Float) -> Unit,
-    onDelete: (Int) -> Unit
+    onDelete: (Int) -> Unit,
+    onInteractionEnd: () -> Unit = {}
 ) {
     val points = remember(element.id, element.brushPath) {
         element.brushPath.split(";").mapNotNull { pair ->
@@ -1413,15 +1755,32 @@ private fun EditorSelectionOverlay(
             .graphicsLayer(rotationZ = element.rotation)
             .border(1.dp, Color(0xFF60A5FA), RoundedCornerShape(5.dp))
             .pointerInput(element.id, element.locked) {
-                detectDragGestures { change, amount ->
+                detectDragGestures(
+                    onDragEnd = onInteractionEnd,
+                    onDragCancel = onInteractionEnd
+                ) { change, amount ->
                     change.consume()
                     if (!element.locked) onMove(element.id, amount.x, amount.y)
                 }
             }
     ) {
-        TransformHandle(Alignment.TopStart, "×", onClick = { onDelete(element.id) })
-        TransformHandle(Alignment.TopEnd, "↻", onDrag = { dx, dy -> onRotate(element.id, (dx - dy) * 1.2f) })
-        TransformHandle(Alignment.BottomEnd, "↘", onDrag = { dx, dy -> onResize(element.id, dx, dy) })
+        TransformHandle(
+            Alignment.TopStart,
+            "×",
+            onClick = { onDelete(element.id) }
+        )
+        TransformHandle(
+            Alignment.TopEnd,
+            "↻",
+            onDrag = { dx, dy -> onRotate(element.id, (dx - dy) * 1.2f) },
+            onDragEnd = onInteractionEnd
+        )
+        TransformHandle(
+            Alignment.BottomEnd,
+            "↘",
+            onDrag = { dx, dy -> onResize(element.id, dx, dy) },
+            onDragEnd = onInteractionEnd
+        )
     }
 }
 
@@ -1430,7 +1789,8 @@ private fun TransformHandle(
     alignment: Alignment,
     label: String,
     onClick: (() -> Unit)? = null,
-    onDrag: ((Float, Float) -> Unit)? = null
+    onDrag: ((Float, Float) -> Unit)? = null,
+    onDragEnd: () -> Unit = {}
 ) {
     Box(Modifier.fillMaxSize()) {
         Box(
@@ -1444,7 +1804,10 @@ private fun TransformHandle(
                 .background(Color(0xFF1E293B), androidx.compose.foundation.shape.CircleShape)
                 .then(
                     if (onDrag != null) Modifier.pointerInput(label) {
-                        detectDragGestures { change, amount ->
+                        detectDragGestures(
+                            onDragEnd = onDragEnd,
+                            onDragCancel = onDragEnd
+                        ) { change, amount ->
                             change.consume()
                             onDrag(amount.x, amount.y)
                         }
