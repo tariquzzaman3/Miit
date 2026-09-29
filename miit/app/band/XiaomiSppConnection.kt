@@ -13,6 +13,7 @@ import java.security.SecureRandom
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.CRC32
+import com.miit.app.MiitWatchfaceSafety
 import javax.crypto.Cipher
 import javax.crypto.Mac
 import javax.crypto.spec.IvParameterSpec
@@ -374,6 +375,10 @@ class XiaomiSppConnection(
 
                 onEvent("Xiaomi watchface install: uploading " + totalParts + " parts")
                 for (part in 0 until totalParts) {
+                    if (!running || !authenticated || auth == null) {
+                        finishWatchfaceInstall(false, "Band connection was lost during watchface upload")
+                        return@Thread
+                    }
                     val start = part * partSize
                     val end = minOf(start + partSize, packet.size)
                     val chunk = ByteArray(4 + end - start)
@@ -381,9 +386,17 @@ class XiaomiSppConnection(
                     putU16le(chunk, 2, part + 1)
                     packet.copyInto(chunk, 4, start, end)
                     sendWatchfaceDataChunk(chunk)
+                    if (!running || !authenticated) {
+                        finishWatchfaceInstall(false, "Band connection was lost during watchface upload")
+                        return@Thread
+                    }
                     watchfaceInstallProgress?.invoke(kotlin.math.round((part + 1) * 100f / totalParts).toInt())
                 }
 
+                if (!running || !authenticated || auth == null) {
+                    finishWatchfaceInstall(false, "Band connection was lost before activation")
+                    return@Thread
+                }
                 onEvent("Xiaomi watchface install: activating " + id)
                 val activated = sendProtoCommand(
                     "activate installed watchface",
@@ -453,6 +466,13 @@ class XiaomiSppConnection(
         }
         if (bytes.isEmpty()) {
             onResult(false, "Watchface package is empty")
+            return false
+        }
+        val packageSafety = MiitWatchfaceSafety.inspectPackage(id, bytes)
+        if (!packageSafety.safe) {
+            val reason = packageSafety.errors.joinToString("; ")
+            onResult(false, "Watchface package safety validation failed: " + reason)
+            onEvent("Xiaomi watchface install rejected: " + reason)
             return false
         }
         watchfaceInstallId = id
