@@ -80,7 +80,7 @@ internal object MiitAiClient {
         """.trimIndent()
     )
 
-    private const val SYSTEM_PROMPT = """
+    private val SYSTEM_PROMPT = """
 You are MIIT AI, a conversational watch-face design assistant inspired by the interaction
 philosophy of creative editors such as PicsArt Assistant.
 
