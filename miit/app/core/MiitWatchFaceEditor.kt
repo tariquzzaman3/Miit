@@ -308,7 +308,9 @@ fun MiitWatchFaceEditor(
 
     Column(Modifier.fillMaxSize().background(Color(0xFF101114)).statusBarsPadding()) {
         // Leave a clean safe area for the phone status bar/camera cut-out.
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(8.dp))
+        PhoneCameraSafeArea()
+        Spacer(Modifier.height(6.dp))
         // Minimal editor header: icon-first, no Material button/card treatment.
         Row(
             Modifier.fillMaxWidth().height(52.dp).background(Color(0xFF18191D)).padding(horizontal = 8.dp),
@@ -1185,14 +1187,42 @@ private fun SubToolBar(
         )
     }
 
-    Row(
-        modifier.background(Color(0xFF17181B)).horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    Column(
+        modifier
+            .fillMaxHeight()
+            .background(Color(0xFF15161A), RoundedCornerShape(16.dp))
+            .border(1.dp, Color(0x223F4652), RoundedCornerShape(16.dp))
+            .padding(horizontal = 5.dp, vertical = 7.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        items.forEach { action ->
-            ToolCell(action.icon, action.title, false, action.onClick)
+        Text(category.name.replace('_', ' '), color = Color(0xFF8B91A0), fontSize = 8.sp, maxLines = 1)
+        Spacer(Modifier.height(5.dp))
+        androidx.compose.foundation.lazy.LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            items(items.size) { index ->
+                val action = items[index]
+                VerticalToolCell(action.icon, action.title, action.onClick)
+            }
         }
+    }
+}
+
+@Composable
+private fun VerticalToolCell(icon: String, title: String, onClick: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            Modifier.size(40.dp).background(Color(0xFF24262C), RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(icon, color = Color(0xFFE2E5EA), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Text(title, color = Color(0xFFA7ABB5), fontSize = 7.sp, maxLines = 1)
     }
 }
 
@@ -1405,7 +1435,7 @@ private fun WatchCanvasV2(
                         else -> EditorTextLayer(element, x, y, element.id == selectedId, onSelect, onMove, device)
                     }
                 }
-                elements.firstOrNull { it.id == selectedId }?.takeIf { isContextualElement(it.type) }?.let { selected ->
+                elements.firstOrNull { it.id == selectedId }?.let { selected ->
                     EditorSelectionOverlay(
                         element = selected,
                         canvasWidthDp = 166.dp,
@@ -1469,11 +1499,7 @@ private fun WatchCanvasV2(
                     }
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            Text("${profile.width} × ${profile.height} px  •  ${profile.source}", color = Color.Gray, fontSize = 10.sp)
-            if (metadataOnly) {
-                Text("Band metadata only — add a reference image to trace the original face", color = Color(0xFF9AA0AA), fontSize = 10.sp)
-            }
+
         }
     }
 }
@@ -1554,8 +1580,44 @@ private fun EditorImageLayer(
             },
         contentAlignment = Alignment.Center
     ) {
-        bitmap?.let { Image(it, "Inserted image", Modifier.fillMaxSize()) }
-            ?: Text("Photo", color = Color.Gray, fontSize = 9.sp)
+        bitmap?.let { Image(it, "Watch-face image", Modifier.fillMaxSize()) }
+            ?: DemoImagePreview()
+    }
+}
+
+@Composable
+private fun DemoImagePreview() {
+    Canvas(
+        Modifier.fillMaxSize().background(Color(0xFF111722), RoundedCornerShape(5.dp))
+    ) {
+        drawRect(Color(0xFF172A45))
+        drawCircle(
+            Color(0xFFFFD36B),
+            radius = size.minDimension * 0.16f,
+            center = Offset(size.width * 0.72f, size.height * 0.24f)
+        )
+        val mountain = androidx.compose.ui.graphics.Path().apply {
+            moveTo(0f, size.height * 0.72f)
+            lineTo(size.width * 0.28f, size.height * 0.43f)
+            lineTo(size.width * 0.48f, size.height * 0.66f)
+            lineTo(size.width * 0.70f, size.height * 0.37f)
+            lineTo(size.width, size.height * 0.70f)
+            lineTo(size.width, size.height)
+            lineTo(0f, size.height)
+            close()
+        }
+        drawPath(mountain, Color(0xFF416B5B))
+        drawRect(
+            Color(0xFF203A38),
+            topLeft = Offset(0f, size.height * 0.78f),
+            size = androidx.compose.ui.geometry.Size(size.width, size.height * 0.22f)
+        )
+        drawLine(
+            Color.White.copy(alpha = 0.85f),
+            Offset(size.width * 0.12f, size.height * 0.85f),
+            Offset(size.width * 0.58f, size.height * 0.85f),
+            strokeWidth = 2.dp.toPx()
+        )
     }
 }
 
@@ -1818,7 +1880,8 @@ private fun EditorSelectionOverlay(
         element.brushPath.split(";").mapNotNull { pair ->
             val p = pair.split(",")
             if (p.size == 2) {
-                val px = p[0].toFloatOrNull(); val py = p[1].toFloatOrNull()
+                val px = p[0].toFloatOrNull()
+                val py = p[1].toFloatOrNull()
                 if (px != null && py != null) px to py else null
             } else null
         }
@@ -1826,17 +1889,45 @@ private fun EditorSelectionOverlay(
     val brush = element.type == EditorElementType.BRUSH && points.isNotEmpty()
     val left = if (brush) points.minOf { it.first } else element.x
     val top = if (brush) points.minOf { it.second } else element.y
-    val right = if (brush) points.maxOf { it.first } else element.x + 20f
-    val bottom = if (brush) points.maxOf { it.second } else element.y + 20f
-    val baseW = if (element.type == EditorElementType.TEXT) 104f else 82f
-    val baseH = if (element.type == EditorElementType.TEXT) 48f else 62f
-    val width = if (brush) ((right - left).coerceAtLeast(10f) / 100f * canvasWidthDp.value * (element.width / 100f).coerceIn(0.1f, 4f)).dp else (baseW * (element.width / 76f).coerceIn(0.1f, 4f)).dp
-    val height = if (brush) ((bottom - top).coerceAtLeast(10f) / 100f * canvasHeightDp.value * (element.height / 100f).coerceIn(0.1f, 4f)).dp else (baseH * (element.height / 55f).coerceIn(0.1f, 4f)).dp
+    val base = when (element.type) {
+        EditorElementType.IMAGE -> 86f to 64f
+        EditorElementType.CIRCLE,
+        EditorElementType.RECTANGLE,
+        EditorElementType.ROUNDED_RECTANGLE,
+        EditorElementType.ELLIPSE,
+        EditorElementType.TRIANGLE,
+        EditorElementType.LINE,
+        EditorElementType.ARC -> 82f to 62f
+        EditorElementType.ANALOG_CLOCK -> 78f to 78f
+        EditorElementType.ANALOG_HAND -> 150f to 150f
+        EditorElementType.CLOCK_FACE -> element.width.coerceAtLeast(40f) to element.height.coerceAtLeast(40f)
+        EditorElementType.ARC_PROGRESS,
+        EditorElementType.LINE_PROGRESS -> 85f to 28f
+        EditorElementType.CONTAINER -> 80f to 45f
+        EditorElementType.BRUSH -> 82f to 62f
+        else -> 104f to 48f
+    }
+    val width = if (brush) {
+        ((points.maxOf { it.first } - left).coerceAtLeast(10f) / 100f * canvasWidthDp.value).dp *
+            (element.width / 100f).coerceIn(0.1f, 4f)
+    } else {
+        (base.first * (element.width / 76f).coerceIn(0.1f, 4f)).dp
+    }
+    val height = if (brush) {
+        ((points.maxOf { it.second } - top).coerceAtLeast(10f) / 100f * canvasHeightDp.value).dp *
+            (element.height / 100f).coerceIn(0.1f, 4f)
+    } else {
+        (base.second * (element.height / 55f).coerceIn(0.1f, 4f)).dp
+    }
     Box(
-        Modifier.offset((left / 100f * canvasWidthDp.value).dp, (top / 100f * canvasHeightDp.value).dp)
-            .size(width.coerceAtLeast(30.dp), height.coerceAtLeast(30.dp))
+        Modifier
+            .offset(
+                (left / 100f * canvasWidthDp.value).dp,
+                (top / 100f * canvasHeightDp.value).dp
+            )
+            .size(width.coerceAtLeast(38.dp), height.coerceAtLeast(38.dp))
             .graphicsLayer(rotationZ = element.rotation)
-            .border(1.dp, Color(0xFF60A5FA), RoundedCornerShape(5.dp))
+            .border(1.dp, Color(0xFF7C8CFF), RoundedCornerShape(5.dp))
             .pointerInput(element.id, element.locked) {
                 detectDragGestures(
                     onDragEnd = onInteractionEnd,
@@ -1847,11 +1938,17 @@ private fun EditorSelectionOverlay(
                 }
             }
     ) {
-        TransformHandle(
-            Alignment.TopStart,
-            "×",
-            onClick = { onDelete(element.id) }
+        Text(
+            elementDisplayName(element),
+            color = Color(0xFFD7DAE2),
+            fontSize = 6.sp,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset(y = 2.dp)
+                .background(Color(0xCC111318), RoundedCornerShape(3.dp))
+                .padding(horizontal = 4.dp, vertical = 2.dp)
         )
+        TransformHandle(Alignment.TopStart, "×", onClick = { onDelete(element.id) })
         TransformHandle(
             Alignment.TopEnd,
             "↻",
@@ -1865,6 +1962,17 @@ private fun EditorSelectionOverlay(
             onDragEnd = onInteractionEnd
         )
     }
+}
+
+private fun elementDisplayName(element: EditorElement): String = when (element.type) {
+    EditorElementType.ANALOG_HAND -> (element.handKind.ifBlank { "Analog" }) + " hand"
+    EditorElementType.DIGITAL_NUMBER -> "Digital number"
+    EditorElementType.ARC_PROGRESS -> "Arc progress"
+    EditorElementType.LINE_PROGRESS -> "Line progress"
+    EditorElementType.ROUNDED_RECTANGLE -> "Rounded rectangle"
+    EditorElementType.HEART_RATE -> "Heart rate"
+    EditorElementType.SPO2 -> "SpO₂"
+    else -> element.type.name.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
 }
 
 @Composable
@@ -2100,17 +2208,64 @@ private fun FullPreview(
     aod: Boolean,
     onBack: () -> Unit
 ) {
-    Column(Modifier.fillMaxSize().background(Color.Black), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        Modifier.fillMaxSize().background(Color.Black).statusBarsPadding(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        PhoneCameraSafeArea()
         Row(
-            Modifier.fillMaxWidth().height(52.dp).background(Color(0xFF18191D)).padding(horizontal = 8.dp),
+            Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+                .background(Color(0xFF0E0F12))
+                .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            ToolGlyph("‹", "Back", onBack)
-            Text(if (aod) "AOD Preview" else "Watch Face Preview", color = Color.White, fontSize = 15.sp)
+            ToolGlyph("‹", "Back to editor", onBack)
+            Text(
+                if (aod) "AOD Preview" else "Watch Face Preview",
+                color = Color.White,
+                fontSize = 14.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                profile.width.toString() + "×" + profile.height.toString(),
+                color = Color(0xFF8A8F9A),
+                fontSize = 8.sp
+            )
         }
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            WatchCanvasV2(elements, 0, profile, null, null, null, 1f, false, {}, { _, _, _ -> })
+        Box(
+            Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            WatchCanvasV2(
+                elements = elements,
+                selectedId = 0,
+                profile = profile,
+                display = null,
+                device = null,
+                referencePath = null,
+                referenceOpacity = 1f,
+                metadataOnly = false,
+                onSelect = {},
+                onMove = { _, _, _ -> }
+            )
         }
+    }
+}
+
+@Composable
+private fun PhoneCameraSafeArea() {
+    Box(
+        Modifier.fillMaxWidth().height(11.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            Modifier
+                .size(7.dp)
+                .background(Color(0xFF050608), androidx.compose.foundation.shape.CircleShape)
+                .border(1.dp, Color(0xFF252832), androidx.compose.foundation.shape.CircleShape)
+        )
     }
 }
 
@@ -2156,31 +2311,31 @@ private fun livePreview(type: EditorElementType, device: BandDevice?): String = 
     EditorElementType.TIME -> java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
     EditorElementType.DATE -> java.text.SimpleDateFormat("dd MMM", java.util.Locale.getDefault()).format(java.util.Date())
     EditorElementType.WEEKDAY -> java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault()).format(java.util.Date())
-    EditorElementType.HEART_RATE -> device?.heartRate?.let { "♥ $it" } ?: "♥"
-    EditorElementType.BATTERY -> device?.batteryPercentage?.let { "$it%" } ?: "▣"
-    EditorElementType.SPO2 -> "O₂"
-    EditorElementType.STEPS -> "↟"
-    EditorElementType.CALORIES -> "Cal"
-    EditorElementType.DISTANCE -> "↗"
-    EditorElementType.SLEEP -> "☾"
-    EditorElementType.WEATHER -> "⌂"
+    EditorElementType.HEART_RATE -> (device?.heartRate ?: 72).toString() + " bpm"
+    EditorElementType.SPO2 -> "98%"
+    EditorElementType.STEPS -> "8,421"
+    EditorElementType.BATTERY -> (device?.batteryPercentage ?: 86).toString() + "%"
+    EditorElementType.CALORIES -> "326 kcal"
+    EditorElementType.DISTANCE -> "4.6 km"
+    EditorElementType.SLEEP -> "7h 28m"
+    EditorElementType.WEATHER -> "27° • Sunny"
+    EditorElementType.DIGITAL_NUMBER -> "12 345"
+    EditorElementType.ANALOG_CLOCK -> "14:37:52"
+    EditorElementType.ARC_PROGRESS -> "76%"
+    EditorElementType.LINE_PROGRESS -> "84%"
+    EditorElementType.BRUSH -> "Brush stroke"
+    EditorElementType.CONTAINER -> "Container"
+    EditorElementType.ANALOG_HAND -> "Hand"
+    EditorElementType.CLOCK_FACE -> "Clock face"
     EditorElementType.TEXT -> "Text"
-    EditorElementType.IMAGE -> "Image"
-    EditorElementType.DIGITAL_NUMBER -> "NUMBER"
-    EditorElementType.ANALOG_CLOCK -> ""
-    EditorElementType.ARC_PROGRESS -> ""
-    EditorElementType.LINE_PROGRESS -> ""
-    EditorElementType.BRUSH -> ""
-    EditorElementType.CONTAINER -> ""
-    EditorElementType.ANALOG_HAND -> ""
-    EditorElementType.CLOCK_FACE -> ""
-    EditorElementType.CIRCLE -> "○"
-    EditorElementType.RECTANGLE -> "□"
-    EditorElementType.ROUNDED_RECTANGLE -> "▭"
-    EditorElementType.ELLIPSE -> "⬭"
-    EditorElementType.TRIANGLE -> "△"
-    EditorElementType.LINE -> "—"
-    EditorElementType.ARC -> "◔"
+    EditorElementType.IMAGE -> "Demo image"
+    EditorElementType.CIRCLE -> "Circle"
+    EditorElementType.RECTANGLE -> "Rectangle"
+    EditorElementType.ROUNDED_RECTANGLE -> "Rounded rectangle"
+    EditorElementType.ELLIPSE -> "Oval"
+    EditorElementType.TRIANGLE -> "Triangle"
+    EditorElementType.LINE -> "Line"
+    EditorElementType.ARC -> "Arc"
 }
 
 private fun renderElementValue(element: EditorElement, device: BandDevice?): String = when (element.type) {
