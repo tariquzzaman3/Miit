@@ -12,6 +12,7 @@ import java.nio.ByteOrder
 import java.security.SecureRandom
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.zip.CRC32
 import javax.crypto.Cipher
 import javax.crypto.Mac
 import javax.crypto.spec.IvParameterSpec
@@ -59,6 +60,11 @@ class XiaomiSppConnection(
     private val rxBuffer = ByteArrayOutputStream()
     private var parserVersion = 1
     private var auth: XiaomiSppAuthenticator? = null
+
+    @Volatile private var watchfaceInstallId: String? = null
+    @Volatile private var watchfaceInstallBytes: ByteArray? = null
+    @Volatile private var watchfaceInstallProgress: ((Int) -> Unit)? = null
+    @Volatile private var watchfaceInstallResult: ((Boolean, String) -> Unit)? = null
 
     @SuppressLint("MissingPermission")
     fun connect() {
