@@ -24,6 +24,10 @@ object XiaomiCommandParser {
     const val WATCHFACE_DELETE = 2
     const val WATCHFACE_INSTALL = 4
 
+    const val TYPE_DATA_UPLOAD = 22
+    const val DATA_UPLOAD_START = 0
+    const val DATA_UPLOAD_WATCHFACE = 16
+
     data class Parsed(
         val type: Int,
         val subtype: Int,
@@ -36,7 +40,10 @@ object XiaomiCommandParser {
         val serialNumber: String? = null,
         val displays: List<BandDisplay> = emptyList(),
         val screenItems: List<BandDisplay> = emptyList(),
-        val watchfaces: List<BandDisplay> = emptyList()
+        val watchfaces: List<BandDisplay> = emptyList(),
+        val installStatus: Int? = null,
+        val uploadResumePosition: Int? = null,
+        val uploadChunkSize: Int? = null
     )
 
     fun parse(data: ByteArray): Parsed? {
@@ -45,6 +52,7 @@ object XiaomiCommandParser {
         var subtype = 0
         var system: ByteArray? = null
         var watchface: ByteArray? = null
+        var dataUpload: ByteArray? = null
 
         while (root.hasRemaining()) {
             val field = root.nextField() ?: break
@@ -53,6 +61,7 @@ object XiaomiCommandParser {
                 2 -> subtype = field.varint?.toInt() ?: 0
                 4 -> system = field.bytes
                 6 -> watchface = field.bytes
+                24 -> dataUpload = field.bytes
             }
         }
 
@@ -60,6 +69,7 @@ object XiaomiCommandParser {
         return when (t) {
             TYPE_SYSTEM -> parseSystem(t, subtype, system)
             TYPE_WATCHFACE -> parseWatchface(t, subtype, watchface)
+            TYPE_DATA_UPLOAD -> parseDataUpload(t, subtype, dataUpload)
             else -> Parsed(t, subtype)
         }
     }
@@ -203,6 +213,15 @@ object XiaomiCommandParser {
 
     private fun parseWatchface(type: Int, subtype: Int, watchface: ByteArray?): Parsed {
         if (watchface == null) return Parsed(type, subtype)
+        if (subtype == WATCHFACE_INSTALL) {
+            val r = ProtoReader(watchface)
+            var installStatus: Int? = null
+            while (r.hasRemaining()) {
+                val f = r.nextField() ?: break
+                if (f.number == 5) installStatus = f.varint?.toInt()
+            }
+            return Parsed(type, subtype, installStatus = installStatus)
+        }
         if (subtype != WATCHFACE_LIST) return Parsed(type, subtype)
 
         val list = mutableListOf<BandDisplay>()
@@ -267,6 +286,31 @@ object XiaomiCommandParser {
         )
     }
 
+    private fun parseDataUpload(type: Int, subtype: Int, dataUpload: ByteArray?): Parsed {
+        if (dataUpload == null) return Parsed(type, subtype)
+        var resume: Int? = null
+        var chunk: Int? = null
+        val outer = ProtoReader(dataUpload)
+        while (outer.hasRemaining()) {
+            val field = outer.nextField() ?: break
+            if (field.number != 2 || field.bytes == null) continue
+            val ack = ProtoReader(field.bytes)
+            while (ack.hasRemaining()) {
+                val f = ack.nextField() ?: break
+                when (f.number) {
+                    4 -> resume = f.varint?.toInt()
+                    5 -> chunk = f.varint?.toInt()
+                }
+            }
+        }
+        return Parsed(
+            type = type,
+            subtype = subtype,
+            uploadResumePosition = resume,
+            uploadChunkSize = chunk
+        )
+    }
+
     private fun mergeDisplays(
         first: List<BandDisplay>,
         second: List<BandDisplay>
@@ -290,11 +334,46 @@ object XiaomiCommandParser {
 
     fun watchfaceListGet(): ByteArray = command(TYPE_WATCHFACE, WATCHFACE_LIST)
 
+    fun watchfaceInstallStart(id: String, size: Int): ByteArray =
+        fieldVarint(1, TYPE_WATCHFACE) +
+            fieldVarint(2, WATCHFACE_INSTALL) +
+            fieldBytes(
+                6,
+                fieldBytes(
+                    6,
+                    fieldBytes(1, id) + fieldVarint(2, size)
+                )
+            )
+
+    fun watchfaceSet(id: String): ByteArray =
+        fieldVarint(1, TYPE_WATCHFACE) +
+            fieldVarint(2, WATCHFACE_SET) +
+            fieldBytes(6, fieldBytes(2, id))
+
+    fun uploadWatchfaceStart(md5: ByteArray, size: Int): ByteArray =
+        fieldVarint(1, TYPE_DATA_UPLOAD) +
+            fieldVarint(2, DATA_UPLOAD_START) +
+            fieldBytes(
+                24,
+                fieldBytes(
+                    1,
+                    fieldBytes(1, DATA_UPLOAD_WATCHFACE)
+                ) +
+                    fieldBytes(2, md5) +
+                    fieldVarint(3, size)
+            )
+
     fun command(type: Int, subtype: Int): ByteArray =
         fieldVarint(1, type) + fieldVarint(2, subtype)
 
     private fun fieldVarint(number: Int, value: Int): ByteArray =
         varint(number shl 3) + varint(value)
+
+    private fun fieldVarint(number: Int, value: Long): ByteArray =
+        varint(number shl 3) + varint(value)
+
+    private fun fieldBytes(number: Int, value: ByteArray): ByteArray =
+        varint((number shl 3) or 2) + varint(value.size) + value
 
     private fun varint(valueIn: Int): ByteArray {
         var value = valueIn
@@ -305,6 +384,18 @@ object XiaomiCommandParser {
             if (value != 0) b = b or 0x80
             out += b.toByte()
         } while (value != 0)
+        return out.toByteArray()
+    }
+
+    private fun varint(valueIn: Long): ByteArray {
+        var value = valueIn
+        val out = ArrayList<Byte>()
+        do {
+            var b = (value and 0x7FL).toInt()
+            value = value ushr 7
+            if (value != 0L) b = b or 0x80
+            out += b.toByte()
+        } while (value != 0L)
         return out.toByteArray()
     }
 
