@@ -143,7 +143,6 @@ fun MiitWatchFaceEditor(
     var nextId by remember(display?.stableId, savedProject?.absolutePath) { mutableIntStateOf(elements.maxOfOrNull { it.id }?.plus(1) ?: 1) }
     var selectedId by remember { mutableIntStateOf(0) }
     var selectedTool by remember { mutableStateOf(ToolCategory.ADD) }
-    var toolOptionsOpen by remember { mutableStateOf(false) }
     var previewMode by remember { mutableStateOf(false) }
     var aodEnabled by remember(savedProject?.absolutePath) { mutableStateOf(savedProject?.let { WatchfaceProjectStore.readAod(it) } ?: false) }
     var editingTextId by remember { mutableIntStateOf(0) }
@@ -245,7 +244,6 @@ fun MiitWatchFaceEditor(
             size = if (type == EditorElementType.TIME) 36f else 18f
         )
         selectedId = id
-        toolOptionsOpen = false
         colorMixerOpen = false
         if (type == EditorElementType.TEXT) editingTextId = id
         if (type == EditorElementType.DIGITAL_NUMBER) sourcePicker = true
@@ -361,163 +359,256 @@ fun MiitWatchFaceEditor(
         }
 
         val selectedElement = elements.firstOrNull { it.id == selectedId }
-        val contextualSelection = selectedElement?.takeIf { isContextualElement(it.type) }
 
-        // PicsArt-inspired chrome:
-        // • normal state: one persistent tool rail
-        // • active element: contextual rail becomes line 1, tool rail shifts to line 2
-        // • tool palettes float over the canvas instead of permanently consuming another row
-        Box(
+        Column(
             Modifier
                 .fillMaxWidth()
-                .height(if (contextualSelection != null) 116.dp else 60.dp)
+                .weight(1f)
+                .padding(horizontal = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column(
+            HorizontalToolBar(
+                selected = selectedTool,
+                onSelect = {
+                    selectedTool = it
+                    colorMixerOpen = false
+                },
+                modifier = Modifier.fillMaxWidth().height(60.dp)
+            )
+
+            Box(
                 Modifier
                     .fillMaxWidth()
-                    .align(Alignment.BottomStart)
+                    .height(58.dp)
+                    .background(Color(0xFF18191D), RoundedCornerShape(14.dp))
             ) {
-                contextualSelection?.let { element ->
+                if (selectedElement != null) {
                     ElementContextBar(
-                        element = element,
+                        element = selectedElement,
                         colorMixerOpen = colorMixerOpen,
                         onToggleColorMixer = { colorMixerOpen = !colorMixerOpen },
                         onColorChange = { color ->
-                            val index = elements.indexOfFirst { it.id == element.id }
-                            if (index >= 0 && !element.locked) {
-                                elements[index] = element.copy(color = color)
-                            }
+                            val index = elements.indexOfFirst { it.id == selectedElement.id }
+                            if (index >= 0 && !selectedElement.locked) elements[index] = selectedElement.copy(color = color)
                         },
                         onOpacityChange = { alpha ->
-                            val index = elements.indexOfFirst { it.id == element.id }
-                            if (index >= 0 && !element.locked) {
-                                elements[index] = element.copy(color = element.color.copy(alpha = alpha))
+                            val index = elements.indexOfFirst { it.id == selectedElement.id }
+                            if (index >= 0 && !selectedElement.locked) {
+                                elements[index] = selectedElement.copy(
+                                    color = selectedElement.color.copy(alpha = alpha)
+                                )
                             }
                         },
                         onFillToggle = {
-                            val index = elements.indexOfFirst { it.id == element.id }
-                            if (index >= 0 && !element.locked) {
-                                elements[index] = element.copy(filled = !element.filled)
+                            val index = elements.indexOfFirst { it.id == selectedElement.id }
+                            if (index >= 0 && !selectedElement.locked) {
+                                elements[index] = selectedElement.copy(
+                                    filled = !selectedElement.filled
+                                )
                             }
                         },
                         onSizeChange = { size ->
-                            val index = elements.indexOfFirst { it.id == element.id }
-                            if (index >= 0 && !element.locked) {
-                                elements[index] = element.copy(
+                            val index = elements.indexOfFirst { it.id == selectedElement.id }
+                            if (index >= 0 && !selectedElement.locked) {
+                                elements[index] = selectedElement.copy(
                                     size = size,
-                                    thickness = if (element.type == EditorElementType.BRUSH) size else element.thickness
+                                    thickness = if (selectedElement.type == EditorElementType.BRUSH) size
+                                    else selectedElement.thickness
                                 )
                             }
                         },
                         onModify = { transform ->
-                            val index = elements.indexOfFirst { it.id == element.id }
-                            if (index >= 0 && !element.locked) {
+                            val index = elements.indexOfFirst { it.id == selectedElement.id }
+                            if (index >= 0 && !selectedElement.locked) {
                                 elements[index] = transform(elements[index])
                             }
                         },
                         onProperties = { propertiesOpen = true },
                         onDelete = {
                             snapshotBeforeChange()
-                            elements.removeAll { it.id == element.id }
+                            elements.removeAll { it.id == selectedElement.id }
                             selectedId = 0
                             colorMixerOpen = false
-                            toolOptionsOpen = false
+                        }
+                    )
+                } else {
+                    Row(
+                        Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Select an element to edit",
+                            color = Color(0xFFB0B4BE),
+                            fontSize = 9.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            profile.width.toString() + " × " + profile.height.toString() + " px",
+                            color = Color(0xFF6F7480),
+                            fontSize = 8.sp
+                        )
+                    }
+                }
+            }
+
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(top = 4.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                SubToolBar(
+                    category = selectedTool,
+                    selected = selectedElement,
+                    aodEnabled = aodEnabled,
+                    onAodChange = { aodEnabled = it },
+                    brushSize = brushSize,
+                    brushColor = brushColor,
+                    onBrushSizeChange = { brushSize = it },
+                    onBrushColorChange = { brushColor = it },
+                    onAdd = ::addElement,
+                    selectHandByName = { hand ->
+                        val idx = elements.indexOfFirst {
+                            it.type == EditorElementType.ANALOG_HAND && it.handKind == hand
+                        }
+                        if (idx >= 0) selectedId = elements[idx].id
+                    },
+                    onAddSource = { name ->
+                        val source = MiCreateCatalog.band9Sources.firstOrNull { it.name == name }
+                        val id = nextId++
+                        elements += EditorElement(
+                            id,
+                            EditorElementType.DIGITAL_NUMBER,
+                            source?.name ?: name,
+                            50f,
+                            50f,
+                            22f,
+                            format = source?.idFprj ?: "0"
+                        )
+                        selectedId = id
+                    },
+                    onPickImage = {
+                        val id = if (selectedId != 0) selectedId else nextId++
+                        if (selectedId == 0) {
+                            elements += EditorElement(id, EditorElementType.IMAGE, "Demo image", 50f, 50f, 24f)
+                            selectedId = id
+                        }
+                        imageTarget = id
+                        imagePicker.launch(arrayOf("image/*"))
+                    },
+                    onReference = {
+                        imageTarget = -1
+                        imagePicker.launch(arrayOf("image/*"))
+                    },
+                    onSourcePicker = { sourcePicker = true },
+                    onModifySelected = { transform ->
+                        val index = elements.indexOfFirst { it.id == selectedId }
+                        if (index >= 0 && !elements[index].locked) {
+                            elements[index] = transform(elements[index])
+                        }
+                    },
+                    onEditText = {
+                        if (selectedElement?.type == EditorElementType.TEXT) editingTextId = selectedId
+                    },
+                    onExport = { onAction("export") },
+                    onBand = { onAction("band") },
+                    onAi = { onAction("aiArrange") },
+                    onLayerAction = { action ->
+                        if (selectedId != 0) applyLayerAction(selectedId, action)
+                    },
+                    modifier = Modifier.width(84.dp).fillMaxHeight()
+                )
+
+                Box(
+                    Modifier.weight(1f).fillMaxHeight()
+                ) {
+                    WatchCanvasV2(
+                        elements = elements,
+                        selectedId = selectedId,
+                        profile = profile,
+                        display = display,
+                        device = device,
+                        referencePath = referencePath,
+                        referenceOpacity = referenceOpacity,
+                        metadataOnly = display != null,
+                        onSelect = { selectedId = it },
+                        onMove = { id, dx, dy ->
+                            val index = elements.indexOfFirst { it.id == id }
+                            if (index >= 0 && !elements[index].locked) {
+                                val current = elements[index]
+                                elements[index] = current.copy(
+                                    x = (current.x + dx).coerceIn(0f, 100f),
+                                    y = (current.y + dy).coerceIn(0f, 100f)
+                                )
+                            }
+                        },
+                        brushMode = selectedTool == ToolCategory.BRUSH,
+                        brushSize = brushSize,
+                        brushColor = brushColor,
+                        onBrushStroke = { points ->
+                            if (points.size >= 2) {
+                                snapshotBeforeChange()
+                                val path = points.joinToString(";") {
+                                    it.first.toString() + "," + it.second.toString()
+                                }
+                                val first = points.first()
+                                val id = nextId++
+                                elements += EditorElement(
+                                    id = id,
+                                    type = EditorElementType.BRUSH,
+                                    preview = "Brush stroke",
+                                    x = first.first,
+                                    y = first.second,
+                                    size = brushSize,
+                                    width = 100f,
+                                    height = 100f,
+                                    color = brushColor,
+                                    thickness = brushSize,
+                                    brushPath = path
+                                )
+                                selectedId = id
+                            }
+                        },
+                        onResize = { id, dx, dy ->
+                            val index = elements.indexOfFirst { it.id == id }
+                            if (index >= 0 && !elements[index].locked) {
+                                val current = elements[index]
+                                elements[index] = current.copy(
+                                    width = (current.width + dx / 1.66f).coerceIn(10f, 180f),
+                                    height = (current.height + dy / 4.08f).coerceIn(10f, 180f)
+                                )
+                            }
+                        },
+                        onRotate = { id, delta ->
+                            val index = elements.indexOfFirst { it.id == id }
+                            if (index >= 0 && !elements[index].locked) {
+                                elements[index] = elements[index].copy(
+                                    rotation = normalizeAngle(elements[index].rotation + delta)
+                                )
+                            }
+                        },
+                        onDeleteElement = { id ->
+                            snapshotBeforeChange()
+                            elements.removeAll { it.id == id }
+                            if (selectedId == id) selectedId = 0
+                            colorMixerOpen = false
+                        },
+                        onInteractionEnd = {
+                            selectedId = 0
+                            colorMixerOpen = false
                         }
                     )
                 }
 
-                HorizontalToolBar(
-                    selected = selectedTool,
-                    onSelect = { tool ->
-                        val sameTool = selectedTool == tool
-                        selectedTool = tool
-                        colorMixerOpen = false
-                        toolOptionsOpen = !(sameTool && toolOptionsOpen)
-                    },
-                    modifier = Modifier.fillMaxWidth().height(60.dp)
-                )
-            }
-
-            if (contextualSelection == null && toolOptionsOpen) {
                 Box(
-                    Modifier
-                        .align(Alignment.BottomCenter)
-                        .offset(y = (-58).dp)
-                        .padding(horizontal = 6.dp)
-                        .fillMaxWidth()
-                        .height(56.dp)
-                        .background(
-                            Color(0xF01A1B20),
-                            RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
-                        )
-                        .border(1.dp, Color(0x223F4652), RoundedCornerShape(16.dp))
+                    Modifier.width(44.dp).fillMaxHeight()
                 ) {
-                    SubToolBar(
-                        category = selectedTool,
-                        selected = selectedElement,
-                        aodEnabled = aodEnabled,
-                        onAodChange = { aodEnabled = it },
-                        brushSize = brushSize,
-                        brushColor = brushColor,
-                        onBrushSizeChange = { brushSize = it },
-                        onBrushColorChange = { brushColor = it },
-                        onAdd = ::addElement,
-                        selectHandByName = { hand ->
-                            val idx = elements.indexOfFirst {
-                                it.type == EditorElementType.ANALOG_HAND && it.handKind == hand
-                            }
-                            if (idx >= 0) selectedId = elements[idx].id
-                        },
-                        onAddSource = { name ->
-                            val source = MiCreateCatalog.band9Sources.firstOrNull { it.name == name }
-                            val id = nextId++
-                            elements += EditorElement(
-                                id,
-                                EditorElementType.DIGITAL_NUMBER,
-                                source?.name ?: name,
-                                50f,
-                                50f,
-                                22f,
-                                format = source?.idFprj ?: "0"
-                            )
-                            selectedId = id
-                            toolOptionsOpen = false
-                        },
-                        onPickImage = {
-                            val id = if (selectedId != 0) selectedId else nextId++
-                            if (selectedId == 0) {
-                                elements += EditorElement(id, EditorElementType.IMAGE, "", 50f, 50f, 24f)
-                                selectedId = id
-                            }
-                            imageTarget = id
-                            imagePicker.launch(arrayOf("image/*"))
-                            toolOptionsOpen = false
-                        },
-                        onReference = {
-                            imageTarget = -1
-                            imagePicker.launch(arrayOf("image/*"))
-                            toolOptionsOpen = false
-                        },
-                        onModifySelected = { transform ->
-                            val index = elements.indexOfFirst { it.id == selectedId }
-                            if (index >= 0 && !elements[index].locked) {
-                                elements[index] = transform(elements[index])
-                            }
-                        },
-                        onEditText = {
-                            if (selectedElement?.type == EditorElementType.TEXT) editingTextId = selectedId
-                        },
-                        onSourcePicker = { sourcePicker = true },
-                        onExport = { onAction("export") },
-                        onBand = { onAction("band") },
-                        onAi = { onAction("aiArrange") },
-                        onLayerAction = { action ->
-                            if (selectedId != 0) {
-                                layersOpen = true
-                                applyLayerAction(selectedId, action)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth().height(56.dp)
+                    LayerDockButton(
+                        onClick = { layersOpen = !layersOpen },
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 8.dp)
                     )
                 }
             }
@@ -590,12 +681,10 @@ fun MiitWatchFaceEditor(
                     elements.removeAll { it.id == id }
                     if (selectedId == id) selectedId = 0
                     colorMixerOpen = false
-                    toolOptionsOpen = false
                 },
                 onInteractionEnd = {
                     selectedId = 0
                     colorMixerOpen = false
-                    toolOptionsOpen = false
                 }
             )
             LayerDockButton(
@@ -639,16 +728,7 @@ private fun HorizontalToolBar(
     }
 }
 
-private fun isContextualElement(type: EditorElementType): Boolean =
-    type == EditorElementType.BRUSH ||
-        type == EditorElementType.TEXT ||
-        type == EditorElementType.CIRCLE ||
-        type == EditorElementType.RECTANGLE ||
-        type == EditorElementType.ROUNDED_RECTANGLE ||
-        type == EditorElementType.ELLIPSE ||
-        type == EditorElementType.TRIANGLE ||
-        type == EditorElementType.LINE ||
-        type == EditorElementType.ARC
+private fun isContextualElement(type: EditorElementType): Boolean = true
 
 private fun normalizeAngle(value: Float): Float {
     var result = value % 360f
@@ -797,7 +877,7 @@ private fun ElementContextBar(
             Column(
                 Modifier
                     .align(Alignment.BottomCenter)
-                    .offset(y = (-52).dp)
+                    .offset(y = 56.dp)
                     .padding(horizontal = 10.dp)
                     .fillMaxWidth()
                     .background(Color(0xF0202126), RoundedCornerShape(18.dp))
