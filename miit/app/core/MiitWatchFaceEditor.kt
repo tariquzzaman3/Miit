@@ -1672,7 +1672,13 @@ private fun EditorAnalogHandLayer(
         else -> s / 60f * 360f
     } + element.rotation - 90f
     Canvas(
-        Modifier.padding(start = x, top = y).size(150.dp).pointerInput(element.id) {
+        Modifier
+            .padding(start = x, top = y)
+            .size(
+                elementScaledWidth(element, 150.dp),
+                elementScaledHeight(element, 150.dp)
+            )
+            .pointerInput(element.id) {
             detectDragGestures(
                 onDragStart = { onSelect(element.id) },
                 onDrag = { change, amount ->
