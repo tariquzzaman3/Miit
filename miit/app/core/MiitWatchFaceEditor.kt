@@ -1887,6 +1887,22 @@ private fun EditorSelectionOverlay(
     }
 }
 
+private fun toolForElement(type: EditorElementType?): ToolCategory = when (type) {
+    EditorElementType.TEXT -> ToolCategory.TEXT
+    EditorElementType.TIME, EditorElementType.DATE, EditorElementType.WEEKDAY,
+    EditorElementType.HEART_RATE, EditorElementType.SPO2, EditorElementType.STEPS,
+    EditorElementType.BATTERY, EditorElementType.CALORIES, EditorElementType.DISTANCE,
+    EditorElementType.SLEEP, EditorElementType.WEATHER, EditorElementType.DIGITAL_NUMBER,
+    EditorElementType.ANALOG_CLOCK, EditorElementType.ANALOG_HAND, EditorElementType.CLOCK_FACE,
+    EditorElementType.ARC_PROGRESS, EditorElementType.LINE_PROGRESS -> ToolCategory.DATA
+    EditorElementType.CIRCLE, EditorElementType.RECTANGLE, EditorElementType.ROUNDED_RECTANGLE,
+    EditorElementType.ELLIPSE, EditorElementType.TRIANGLE, EditorElementType.LINE,
+    EditorElementType.ARC, EditorElementType.CONTAINER -> ToolCategory.SHAPE
+    EditorElementType.BRUSH -> ToolCategory.BRUSH
+    EditorElementType.IMAGE -> ToolCategory.MEDIA
+    null -> ToolCategory.ADD
+}
+
 private fun elementDisplayName(element: EditorElement): String = when (element.type) {
     EditorElementType.ANALOG_HAND -> (element.handKind.ifBlank { "Analog" }) + " hand"
     EditorElementType.DIGITAL_NUMBER -> "Digital number"
