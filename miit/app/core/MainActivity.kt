@@ -131,6 +131,9 @@ private fun MiitApp() {
     var screen by remember { mutableStateOf(if (devices.any { it.authenticated }) MiitScreen.BAND else MiitScreen.CONNECTION) }
     var themeMode by remember { mutableStateOf(MiitSettingsStore.theme(context)) }
     var showHelp by remember { mutableStateOf(false) }
+    var pendingInstall by remember { mutableStateOf<MiitNativeWatchfaceCompiler.Result?>(null) }
+    var pendingInstallReport by remember { mutableStateOf<MiitWatchfaceSafety.PackageReport?>(null) }
+    var pendingInstallPreflight by remember { mutableStateOf<MiitWatchfaceSafety.PreflightReport?>(null) }
     val scope = rememberCoroutineScope()
 
     fun acceptKeys(found: List<MiFitnessAuthKeyExtractor.Candidate>, startAutomatically: Boolean = false) {
@@ -268,34 +271,26 @@ private fun MiitApp() {
                     }
                 },
                 onInstallToBand = { compiled ->
-                    Toast.makeText(
-                        context,
-                        "Uploading " + compiled.name + " to " + (connectedBand?.name ?: "Xiaomi Band") + "…",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    var lastShownBucket = -1
-                    val started = scanner.installWatchface(
-                        id = compiled.id,
-                        bytes = compiled.bytes,
-                        onProgress = { progress ->
-                            val bucket = progress / 20
-                            if (progress == 0 || progress == 100 || bucket > lastShownBucket) {
-                                lastShownBucket = bucket
-                                Toast.makeText(context, "Band upload: " + progress + "%", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        onResult = { success, message ->
-                            Toast.makeText(
-                                context,
-                                if (success) "✓ " + message else "Band install failed: " + message,
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }
+                    val report = MiitWatchfaceSafety.inspectPackage(compiled.id, compiled.bytes)
+                    val preflight = MiitWatchfaceSafety.preflightBand(
+                        context = context,
+                        device = connectedBand,
+                        report = report,
+                        requestedId = compiled.id
                     )
-                    if (!started) {
-                        Toast.makeText(context, "The Band connection is not ready for installation.", Toast.LENGTH_LONG).show()
+                    if (!preflight.safe) {
+                        Toast.makeText(
+                            context,
+                            "Safety check blocked installation: " + preflight.errors.joinToString(" "),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        pendingInstall = compiled
+                        pendingInstallReport = report
+                        pendingInstallPreflight = preflight
                     }
                 }
+
             )
             MiitScreen.SETTINGS -> MiitSettingsScreen(
                 themeMode = themeMode,
@@ -323,8 +318,96 @@ private fun MiitApp() {
     }
 
     if (showHelp) AuthKeyInstructionsDialog(onDismiss = { showHelp = false })
+
+    val installToConfirm = pendingInstall
+    val installReport = pendingInstallReport
+    val installPreflight = pendingInstallPreflight
+    if (installToConfirm != null && installReport != null && installPreflight != null) {
+        SafetyInstallDialog(
+            band = connectedBand,
+            result = installToConfirm,
+            report = installReport,
+            preflight = installPreflight,
+            onDismiss = {
+                pendingInstall = null
+                pendingInstallReport = null
+                pendingInstallPreflight = null
+            },
+            onConfirm = {
+                pendingInstall = null
+                pendingInstallReport = null
+                pendingInstallPreflight = null
+                Toast.makeText(
+                    context,
+                    "Uploading " + installToConfirm.name + " to " + (connectedBand?.name ?: "Xiaomi Band") + "…",
+                    Toast.LENGTH_SHORT
+                ).show()
+                var lastShownBucket = -1
+                val started = scanner.installWatchface(
+                    id = installToConfirm.id,
+                    bytes = installToConfirm.bytes,
+                    onProgress = { progress ->
+                        val bucket = progress / 20
+                        if (progress == 0 || progress == 100 || bucket > lastShownBucket) {
+                            lastShownBucket = bucket
+                            Toast.makeText(context, "Band upload: " + progress + "%", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onResult = { success, message ->
+                        Toast.makeText(
+                            context,
+                            if (success) "✓ " + message else "Band install failed: " + message,
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                )
+                if (!started) {
+                    Toast.makeText(context, "The Band connection is not ready for installation.", Toast.LENGTH_LONG).show()
+                }
+            }
+        )
+    }
+
     // Multiple extracted keys are tested automatically.
     }
+}
+
+
+@Composable
+private fun SafetyInstallDialog(
+    band: BandDevice?,
+    result: MiitNativeWatchfaceCompiler.Result,
+    report: MiitWatchfaceSafety.PackageReport,
+    preflight: MiitWatchfaceSafety.PreflightReport,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Safety check before Band install") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("MIIT will upload only this watch-face package. It does not send firmware or delete commands.")
+                Text("Target: " + (band?.model ?: band?.name ?: "Unknown") + " • " + report.width + "×" + report.height + " px")
+                Text("Band battery: " + (band?.batteryPercentage?.toString() ?: "unknown") + "%")
+                Text("Package: " + report.sizeLabel + " • " + report.faceCount + " face(s)")
+                Text("SHA-256: " + report.sha256.take(20) + "…", fontSize = 10.sp)
+                Text("Verified checks", fontWeight = FontWeight.SemiBold)
+                Text("✓ Exact supported resolution and package structure")
+                Text("✓ Band authentication and current face inventory")
+                Text("✓ Band battery ≥ " + MiitWatchfaceSafety.MIN_BAND_BATTERY_PERCENT + "%")
+                Text("✓ Phone battery ≥ " + MiitWatchfaceSafety.MIN_PHONE_BATTERY_PERCENT + "%")
+                preflight.warnings.forEach { Text("⚠ " + it, fontSize = 11.sp) }
+                Text(
+                    "Before installing: sync your Band with Mi Fitness, close Mi Fitness and other Band apps, keep the phone nearby, and do not interrupt the transfer.",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 11.sp
+                )
+            }
+        },
+        dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = { Button(onClick = onConfirm) { Text("Install safely") } }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
