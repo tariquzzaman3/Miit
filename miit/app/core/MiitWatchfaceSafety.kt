@@ -49,17 +49,17 @@ object MiitWatchfaceSafety {
     )
 
     fun supportedTarget(model: String?, name: String?): SupportedTarget? {
-        val candidates = listOfNotNull(model, name)
-            .map { normalizeModel(it) }
-            .filter { it.isNotBlank() }
-        return candidates.firstNotNullOfOrNull { value ->
-            when {
-                value.matches(Regex("^(xiaomi )?smart band 10( nfc| ceramic edition| glimmer edition)?$")) ->
-                    SupportedTarget(212, 520, "Xiaomi Smart Band 10")
-                value.matches(Regex("^(xiaomi )?smart band 9( nfc)?$")) ->
-                    SupportedTarget(192, 490, "Xiaomi Smart Band 9")
-                else -> null
-            }
+        val normalizedModel = normalizeModel(model.orEmpty())
+        val normalizedName = normalizeModel(name.orEmpty())
+        // When the firmware exposes a human-readable model, treat it as authoritative.
+        // Only fall back to the Bluetooth name when the model field is an opaque identifier.
+        val candidate = if (normalizedModel.contains("band")) normalizedModel else normalizedName
+        return when {
+            candidate.matches(Regex("^(xiaomi )?smart band 10( nfc| ceramic edition| glimmer edition)?$")) ->
+                SupportedTarget(212, 520, "Xiaomi Smart Band 10")
+            candidate.matches(Regex("^(xiaomi )?smart band 9( nfc)?$")) ->
+                SupportedTarget(192, 490, "Xiaomi Smart Band 9")
+            else -> null
         }
     }
 
