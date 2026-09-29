@@ -120,7 +120,8 @@ fun MiitWatchFaceEditor(
     savedProject: java.io.File? = null,
     device: BandDevice?,
     onBack: () -> Unit,
-    onAction: (String) -> Unit
+    onAction: (String) -> Unit,
+    onInstallToBand: (MiitNativeWatchfaceCompiler.Result) -> Unit = {}
 ) {
     val context = LocalContext.current
     val profile = remember(device?.model, device?.name) { resolveProfile(device) }
@@ -516,7 +517,28 @@ fun MiitWatchFaceEditor(
                         if (selectedElement?.type == EditorElementType.TEXT) editingTextId = selectedId
                     },
                     onExport = { onAction("export") },
-                    onBand = { onAction("band") },
+                    onBand = {
+                        runCatching {
+                            MiitNativeWatchfaceCompiler.compile(
+                                context = context,
+                                name = display?.name ?: "MIIT Watch Face",
+                                target = MiitNativeWatchfaceCompiler.Target(
+                                    width = profile.width,
+                                    height = profile.height,
+                                    model = profile.source
+                                ),
+                                elements = elements.toList(),
+                                aod = aodEnabled
+                            )
+                        }.onSuccess(onInstallToBand)
+                            .onFailure {
+                                Toast.makeText(
+                                    context,
+                                    "Cannot prepare the Band face: " + (it.message ?: it.javaClass.simpleName),
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                    },
                     onAi = { onAction("aiArrange") },
                     onLayerAction = { action ->
                         if (selectedId != 0) applyLayerAction(selectedId, action)
