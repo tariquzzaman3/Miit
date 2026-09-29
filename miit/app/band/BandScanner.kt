@@ -371,6 +371,25 @@ class BandScanner(context: Context, initialActivity: Activity? = null) {
         else -> "UNKNOWN"
     }
 
+    fun installWatchface(
+        id: String,
+        bytes: ByteArray,
+        onProgress: (Int) -> Unit = {},
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ): Boolean {
+        val connection = spp
+        if (connection == null) {
+            mainHandler.post { onResult(false, "No active Xiaomi Band connection") }
+            MiitTestLog.add("Watchface install rejected: SPP connection unavailable")
+            return false
+        }
+        return connection.installWatchface(
+            id = id,
+            bytes = bytes,
+            onProgress = { progress -> mainHandler.post { onProgress(progress) } },
+            onResult = { success, message -> mainHandler.post { onResult(success, message) } }
+        )
+    }
     fun close() { stopScan() }
 
     fun shutdownForProcess() {
