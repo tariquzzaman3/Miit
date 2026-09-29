@@ -415,6 +415,7 @@ fun MiitWatchFaceEditor(
                                 elements[index] = transform(elements[index])
                             }
                         },
+                        onProperties = { propertiesOpen = true },
                         onDelete = {
                             snapshotBeforeChange()
                             elements.removeAll { it.id == element.id }
@@ -670,6 +671,7 @@ private fun ElementContextBar(
     onFillToggle: () -> Unit,
     onSizeChange: (Float) -> Unit,
     onModify: (((EditorElement) -> EditorElement)) -> Unit,
+    onProperties: () -> Unit,
     onDelete: () -> Unit
 ) {
     val hsv = remember(element.id, element.color) {
@@ -780,7 +782,7 @@ private fun ElementContextBar(
                 icon = "⚙",
                 label = "Edit",
                 active = false,
-                onClick = { onModify { it } }
+                onClick = onProperties
             )
             ContextIcon(
                 icon = "×",
