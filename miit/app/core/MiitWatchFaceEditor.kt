@@ -1349,13 +1349,26 @@ private fun WatchCanvasV2(
                         EditorElementType.CIRCLE, EditorElementType.RECTANGLE, EditorElementType.ROUNDED_RECTANGLE,
                         EditorElementType.ELLIPSE, EditorElementType.TRIANGLE, EditorElementType.LINE, EditorElementType.ARC ->
                             EditorShapeLayer(element, x, y, element.id == selectedId, onSelect, onMove)
-                        EditorElementType.ANALOG_CLOCK -> EditorAnalogLayer(element, x, y, element.id == selectedId, onSelect)
+                        EditorElementType.ANALOG_CLOCK -> EditorAnalogLayer(element, x, y, element.id == selectedId, onSelect, onMove)
                         EditorElementType.ANALOG_HAND -> EditorAnalogHandLayer(element, x, y, element.id == selectedId, onSelect, onMove)
                         EditorElementType.CLOCK_FACE -> EditorClockFaceLayer(element, x, y, element.id == selectedId, onSelect, onMove)
-                        EditorElementType.ARC_PROGRESS, EditorElementType.LINE_PROGRESS -> EditorProgressLayer(element, x, y, device)
+                        EditorElementType.ARC_PROGRESS, EditorElementType.LINE_PROGRESS ->
+                            EditorProgressLayer(
+                                element,
+                                x,
+                                y,
+                                device,
+                                element.id == selectedId,
+                                onSelect,
+                                onMove
+                            )
                         EditorElementType.CONTAINER -> Box(
                             Modifier.padding(start = x, top = y)
-                                .size(80.dp, 45.dp)
+                                .size(
+                                    elementScaledWidth(element, 80.dp),
+                                    elementScaledHeight(element, 45.dp)
+                                )
+                                .graphicsLayer(rotationZ = element.rotation)
                                 .background(Color.Transparent, RoundedCornerShape(5.dp))
                                 .pointerInput(element.id) {
                                     detectDragGestures { change, amount ->
@@ -1686,9 +1699,27 @@ private fun EditorAnalogLayer(
     x: Dp,
     y: Dp,
     selected: Boolean,
-    onSelect: (Int) -> Unit
+    onSelect: (Int) -> Unit,
+    onMove: (Int, Float, Float) -> Unit
 ) {
-    Canvas(Modifier.padding(start = x, top = y).size(78.dp).clickable { onSelect(element.id) }) {
+    Canvas(
+        Modifier
+            .padding(start = x, top = y)
+            .size(
+                elementScaledWidth(element, 84.dp),
+                elementScaledHeight(element, 84.dp)
+            )
+            .graphicsLayer(rotationZ = element.rotation)
+            .pointerInput(element.id) {
+                detectDragGestures(
+                    onDragStart = { onSelect(element.id) },
+                    onDrag = { change, amount ->
+                        change.consume()
+                        onMove(element.id, amount.x / 1.66f, amount.y / 4.08f)
+                    }
+                )
+            }
+    ) {
         val now = java.util.Calendar.getInstance()
         val h = now.get(java.util.Calendar.HOUR)
         val m = now.get(java.util.Calendar.MINUTE)
@@ -1713,13 +1744,33 @@ private fun EditorProgressLayer(
     element: EditorElement,
     x: Dp,
     y: Dp,
-    device: BandDevice?
+    device: BandDevice?,
+    selected: Boolean = false,
+    onSelect: (Int) -> Unit = {},
+    onMove: (Int, Float, Float) -> Unit = { _, _, _ -> }
 ) {
     val value = when (element.preview) {
         "Battery percent" -> (device?.batteryPercentage ?: 0).coerceIn(0, 100) / 100f
         else -> 0f
     }
-    Canvas(Modifier.padding(start = x, top = y).size(85.dp, 28.dp)) {
+    Canvas(
+        Modifier
+            .padding(start = x, top = y)
+            .size(
+                elementScaledWidth(element, 92.dp),
+                elementScaledHeight(element, 30.dp)
+            )
+            .graphicsLayer(rotationZ = element.rotation)
+            .pointerInput(element.id) {
+                detectDragGestures(
+                    onDragStart = { onSelect(element.id) },
+                    onDrag = { change, amount ->
+                        change.consume()
+                        onMove(element.id, amount.x / 1.66f, amount.y / 4.08f)
+                    }
+                )
+            }
+    ) {
         if (element.type == EditorElementType.LINE_PROGRESS) {
             drawLine(Color.DarkGray, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 4.dp.toPx())
             drawLine(element.color, Offset(0f, size.height / 2), Offset(size.width * value, size.height / 2), 4.dp.toPx())
