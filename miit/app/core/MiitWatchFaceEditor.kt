@@ -35,6 +35,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Slider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,6 +50,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -146,6 +148,7 @@ fun MiitWatchFaceEditor(
     var referenceOpacity by remember { mutableStateOf(0.65f) }
     var brushSize by remember { mutableStateOf(6f) }
     var brushColor by remember { mutableStateOf(Color.White) }
+    var colorMixerOpen by remember { mutableStateOf(false) }
     var propertiesOpen by remember { mutableStateOf(false) }
     var undoStack by remember { mutableStateOf<List<List<EditorElement>>>(emptyList()) }
     var redoStack by remember { mutableStateOf<List<List<EditorElement>>>(emptyList()) }
@@ -356,77 +359,77 @@ fun MiitWatchFaceEditor(
             modifier = Modifier.fillMaxWidth().height(66.dp)
         )
 
-        // BAR 2 — contextual sub-tools, horizontally swipeable.
-        SubToolBar(
-            category = selectedTool,
-            selected = elements.firstOrNull { it.id == selectedId },
-            aodEnabled = aodEnabled,
-            onAodChange = { aodEnabled = it },
-            brushSize = brushSize,
-            brushColor = brushColor,
-            onBrushSizeChange = { brushSize = it },
-            onBrushColorChange = { brushColor = it },
-            onAdd = ::addElement,
-            selectHandByName = { hand ->
-                val idx = elements.indexOfFirst { it.type == EditorElementType.ANALOG_HAND && it.handKind == hand }
-                if (idx >= 0) selectedId = elements[idx].id
-            },
-            onAddSource = { name ->
-                val source = MiCreateCatalog.band9Sources.firstOrNull { it.name == name }
-                val id = nextId++
-                elements += EditorElement(
-                    id = id,
-                    type = EditorElementType.DIGITAL_NUMBER,
-                    preview = source?.name ?: name,
-                    x = 50f,
-                    y = 50f,
-                    size = 22f,
-                    format = source?.idFprj ?: "0"
-                )
-                selectedId = id
-            },
-            onPickImage = {
-                val id = if (selectedId != 0) selectedId else nextId++
-                if (selectedId == 0) {
-                    elements += EditorElement(id, EditorElementType.IMAGE, "", 50f, 50f, 24f)
+        // BAR 2 — contextual object controls for pen, shapes and text.
+        val selectedElement = elements.firstOrNull { it.id == selectedId }
+        if (selectedElement != null && isContextualElement(selectedElement.type)) {
+            ElementContextBar(
+                element = selectedElement,
+                colorMixerOpen = colorMixerOpen,
+                onToggleColorMixer = { colorMixerOpen = !colorMixerOpen },
+                onColorChange = { color ->
+                    val index = elements.indexOfFirst { it.id == selectedElement.id }
+                    if (index >= 0 && !selectedElement.locked) elements[index] = selectedElement.copy(color = color)
+                },
+                onOpacityChange = { alpha ->
+                    val index = elements.indexOfFirst { it.id == selectedElement.id }
+                    if (index >= 0 && !selectedElement.locked) elements[index] = selectedElement.copy(color = selectedElement.color.copy(alpha = alpha))
+                },
+                onFillToggle = {
+                    val index = elements.indexOfFirst { it.id == selectedElement.id }
+                    if (index >= 0 && !selectedElement.locked) elements[index] = selectedElement.copy(filled = !selectedElement.filled)
+                },
+                onRotate = { delta ->
+                    val index = elements.indexOfFirst { it.id == selectedElement.id }
+                    if (index >= 0 && !selectedElement.locked) elements[index] = selectedElement.copy(rotation = normalizeAngle(selectedElement.rotation + delta))
+                },
+                onDelete = {
+                    snapshotBeforeChange()
+                    elements.removeAll { it.id == selectedElement.id }
+                    selectedId = elements.firstOrNull()?.id ?: 0
+                    colorMixerOpen = false
+                }
+            )
+        } else {
+            SubToolBar(
+                category = selectedTool,
+                selected = selectedElement,
+                aodEnabled = aodEnabled,
+                onAodChange = { aodEnabled = it },
+                brushSize = brushSize,
+                brushColor = brushColor,
+                onBrushSizeChange = { brushSize = it },
+                onBrushColorChange = { brushColor = it },
+                onAdd = ::addElement,
+                selectHandByName = { hand ->
+                    val idx = elements.indexOfFirst { it.type == EditorElementType.ANALOG_HAND && it.handKind == hand }
+                    if (idx >= 0) selectedId = elements[idx].id
+                },
+                onAddSource = { name ->
+                    val source = MiCreateCatalog.band9Sources.firstOrNull { it.name == name }
+                    val id = nextId++
+                    elements += EditorElement(id, EditorElementType.DIGITAL_NUMBER, source?.name ?: name, 50f, 50f, 22f, format = source?.idFprj ?: "0")
                     selectedId = id
-                }
-                imageTarget = id
-                imagePicker.launch(arrayOf("image/*"))
-            },
-            onReference = {
-                imageTarget = -1
-                imagePicker.launch(arrayOf("image/*"))
-            },
-            onModifySelected = { transform ->
-                val index = elements.indexOfFirst { it.id == selectedId }
-                if (index >= 0 && !elements[index].locked) elements[index] = transform(elements[index])
-            },
-            onEditText = {
-                if (elements.firstOrNull { it.id == selectedId }?.type == EditorElementType.TEXT) editingTextId = selectedId
-            },
-            onSourcePicker = { sourcePicker = true },
-            onExport = { onAction("export") },
-            onBand = { onAction("band") },
-            onAi = {
-                val visible = elements.filter { it.visible }
-                if (visible.isNotEmpty()) {
-                    val count = visible.size
-                    var n = 0
-                    visible.forEach {
-                        val index = elements.indexOfFirst { e -> e.id == it.id }
-                        if (index >= 0) {
-                            elements[index] = elements[index].copy(x = 50f, y = if (count == 1) 50f else 10f + (84f / (count - 1)) * n++)
-                        }
-                    }
-                }
-            },
-            onLayerAction = { action ->
-                layersOpen = true
-                applyLayerAction(selectedId, action)
-            },
-            modifier = Modifier.fillMaxWidth().height(58.dp)
-        )
+                },
+                onPickImage = {
+                    val id = if (selectedId != 0) selectedId else nextId++
+                    if (selectedId == 0) { elements += EditorElement(id, EditorElementType.IMAGE, "", 50f, 50f, 24f); selectedId = id }
+                    imageTarget = id
+                    imagePicker.launch(arrayOf("image/*"))
+                },
+                onReference = { imageTarget = -1; imagePicker.launch(arrayOf("image/*")) },
+                onModifySelected = { transform ->
+                    val index = elements.indexOfFirst { it.id == selectedId }
+                    if (index >= 0 && !elements[index].locked) elements[index] = transform(elements[index])
+                },
+                onEditText = { if (selectedElement?.type == EditorElementType.TEXT) editingTextId = selectedId },
+                onSourcePicker = { sourcePicker = true },
+                onExport = { onAction("export") },
+                onBand = { onAction("band") },
+                onAi = { onAction("aiArrange") },
+                onLayerAction = { action -> layersOpen = true; applyLayerAction(selectedId, action) },
+                modifier = Modifier.fillMaxWidth().height(58.dp)
+            )
+        }
 
         // MIDDLE — actual editor display.
         Box(Modifier.fillMaxSize().weight(1f)) {
@@ -523,6 +526,78 @@ private fun HorizontalToolBar(
     }
 }
 
+private fun isContextualElement(type: EditorElementType): Boolean =
+    type == EditorElementType.BRUSH ||
+        type == EditorElementType.TEXT ||
+        type == EditorElementType.CIRCLE ||
+        type == EditorElementType.RECTANGLE ||
+        type == EditorElementType.ROUNDED_RECTANGLE ||
+        type == EditorElementType.ELLIPSE ||
+        type == EditorElementType.TRIANGLE ||
+        type == EditorElementType.LINE ||
+        type == EditorElementType.ARC
+
+private fun normalizeAngle(value: Float): Float {
+    var result = value % 360f
+    if (result < 0f) result += 360f
+    return result
+}
+
+@Composable
+private fun ElementContextBar(
+    element: EditorElement,
+    colorMixerOpen: Boolean,
+    onToggleColorMixer: () -> Unit,
+    onColorChange: (Color) -> Unit,
+    onOpacityChange: (Float) -> Unit,
+    onFillToggle: () -> Unit,
+    onRotate: (Float) -> Unit,
+    onDelete: () -> Unit
+) {
+    val hsv = remember(element.id, element.color) { FloatArray(3).also { android.graphics.Color.colorToHSV(element.color.toArgb(), it) } }
+    var hue by remember(element.id, element.color) { mutableStateOf(hsv[0]) }
+    var saturation by remember(element.id, element.color) { mutableStateOf(hsv[1]) }
+    var value by remember(element.id, element.color) { mutableStateOf(hsv[2]) }
+    fun applyColor() = onColorChange(Color.hsv(hue, saturation, value, element.color.alpha))
+    Column(Modifier.fillMaxWidth().background(Color(0xFF1A1B20))) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            ContextAction("Color", element.color, onToggleColorMixer)
+            ContextActionText("↻") { onRotate(15f) }
+            if (element.type in setOf(EditorElementType.CIRCLE, EditorElementType.RECTANGLE, EditorElementType.ROUNDED_RECTANGLE, EditorElementType.ELLIPSE, EditorElementType.TRIANGLE)) {
+                ContextActionText(if (element.filled) "Fill" else "Outline") { onFillToggle() }
+            }
+            ContextActionText("×") { onDelete() }
+        }
+        if (colorMixerOpen) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(28.dp).background(element.color, RoundedCornerShape(7.dp)))
+                Text("H", color = Color.White, fontSize = 8.sp, modifier = Modifier.padding(horizontal = 3.dp))
+                Slider(hue, { hue = it; applyColor() }, valueRange = 0f..360f, modifier = Modifier.weight(1f))
+                Text("S", color = Color.White, fontSize = 8.sp, modifier = Modifier.padding(horizontal = 3.dp))
+                Slider(saturation, { saturation = it; applyColor() }, valueRange = 0f..1f, modifier = Modifier.weight(1f))
+                Text("V", color = Color.White, fontSize = 8.sp, modifier = Modifier.padding(horizontal = 3.dp))
+                Slider(value, { value = it; applyColor() }, valueRange = 0f..1f, modifier = Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 1.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Opacity", color = Color.Gray, fontSize = 8.sp, modifier = Modifier.width(42.dp))
+                Slider(element.color.alpha, onOpacityChange, valueRange = 0f..1f, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContextAction(label: String, color: Color, onClick: () -> Unit) {
+    Row(Modifier.background(Color(0xFF25262C), RoundedCornerShape(9.dp)).clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(14.dp).background(color, RoundedCornerShape(4.dp)))
+        Text(label, color = Color.White, fontSize = 9.sp, modifier = Modifier.padding(start = 5.dp))
+    }
+}
+
+@Composable
+private fun ContextActionText(label: String, onClick: () -> Unit) {
+    Box(Modifier.background(Color(0xFF25262C), RoundedCornerShape(9.dp)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 7.dp)) { Text(label, color = Color.White, fontSize = 9.sp) }
+}
 @Composable
 private fun SubToolBar(
     category: ToolCategory,
