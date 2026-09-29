@@ -1155,7 +1155,7 @@ private fun AiAssistantDialog(
 }
 
 @Composable
-HorizontalToolBar(
+private fun HorizontalToolBar(
     selected: ToolCategory,
     onSelect: (ToolCategory) -> Unit,
     modifier: Modifier
