@@ -778,27 +778,28 @@ fun MiitWatchFaceEditor(
                             ).show()
                         } else {
                             runCatching {
-                            MiitNativeWatchfaceCompiler.compile(
-                                context = context,
-                                name = display?.name ?: "MIIT Watch Face",
-                                target = MiitNativeWatchfaceCompiler.Target(
-                                    width = profile.width,
-                                    height = profile.height,
-                                    model = profile.source
-                                ),
-                                elements = elements.toList(),
-                                aod = aodEnabled
-                            )
-                        }.onSuccess(onInstallToBand)
-                            .onFailure {
-                                Toast.makeText(
-                                    context,
-                                    "Cannot prepare the Band face: " + (it.message ?: it.javaClass.simpleName),
-                                    Toast.LENGTH_LONG
-                                ).show()
-                            }
+                                MiitNativeWatchfaceCompiler.compile(
+                                    context = context,
+                                    name = display?.name ?: "MIIT Watch Face",
+                                    target = MiitNativeWatchfaceCompiler.Target(
+                                        width = profile.width,
+                                        height = profile.height,
+                                        model = profile.source
+                                    ),
+                                    elements = elements.toList(),
+                                    aod = aodEnabled
+                                )
+                            }.onSuccess(onInstallToBand)
+                                .onFailure {
+                                    Toast.makeText(
+                                        context,
+                                        "Cannot prepare the Band face: " + (it.message ?: it.javaClass.simpleName),
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                        }
                     },
-                                        onAi = {
+                    onAi = {
                         aiOpen = true
                         selectedTool = ToolCategory.AI
                     },
