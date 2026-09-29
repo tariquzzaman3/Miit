@@ -2313,13 +2313,13 @@ private fun livePreview(type: EditorElementType, device: BandDevice?): String = 
     EditorElementType.WEEKDAY -> java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault()).format(java.util.Date())
     EditorElementType.HEART_RATE -> (device?.heartRate ?: 72).toString() + " bpm"
     EditorElementType.SPO2 -> "98%"
-    EditorElementType.STEPS -> "8,421"
+    EditorElementType.STEPS -> "8,421 steps"
     EditorElementType.BATTERY -> (device?.batteryPercentage ?: 86).toString() + "%"
     EditorElementType.CALORIES -> "326 kcal"
     EditorElementType.DISTANCE -> "4.6 km"
     EditorElementType.SLEEP -> "7h 28m"
     EditorElementType.WEATHER -> "27° • Sunny"
-    EditorElementType.DIGITAL_NUMBER -> "12 345"
+    EditorElementType.DIGITAL_NUMBER -> "12,345"
     EditorElementType.ANALOG_CLOCK -> "14:37:52"
     EditorElementType.ARC_PROGRESS -> "76%"
     EditorElementType.LINE_PROGRESS -> "84%"
@@ -2327,7 +2327,7 @@ private fun livePreview(type: EditorElementType, device: BandDevice?): String = 
     EditorElementType.CONTAINER -> "Container"
     EditorElementType.ANALOG_HAND -> "Hand"
     EditorElementType.CLOCK_FACE -> "Clock face"
-    EditorElementType.TEXT -> "Text"
+    EditorElementType.TEXT -> "Hello MIIT"
     EditorElementType.IMAGE -> "Demo image"
     EditorElementType.CIRCLE -> "Circle"
     EditorElementType.RECTANGLE -> "Rectangle"
@@ -2349,7 +2349,7 @@ private fun renderElementValue(element: EditorElement, device: BandDevice?): Str
             "MM/DD" -> "MM/dd"
             "DD MMM" -> "dd MMM"
             "DD MMM YYYY" -> "dd MMM yyyy"
-            else -> "dd"
+            else -> "dd MMM"
         },
         java.util.Locale.getDefault()
     ).format(java.util.Date())
@@ -2357,8 +2357,15 @@ private fun renderElementValue(element: EditorElement, device: BandDevice?): Str
         if (element.format == "Monday") "EEEE" else "EEE",
         java.util.Locale.getDefault()
     ).format(java.util.Date())
-    EditorElementType.HEART_RATE -> device?.heartRate?.let { "♥ $it" } ?: element.preview.ifBlank { "♥" }
-    EditorElementType.BATTERY -> device?.batteryPercentage?.let { "$it%" } ?: element.preview.ifBlank { "▣" }
-    EditorElementType.TEXT -> element.preview.ifBlank { "Text" }
+    EditorElementType.HEART_RATE -> device?.heartRate?.let { "♥ $it" } ?: element.preview.ifBlank { "72 bpm" }
+    EditorElementType.SPO2 -> element.preview.ifBlank { "98%" }
+    EditorElementType.STEPS -> element.preview.ifBlank { "8,421 steps" }
+    EditorElementType.BATTERY -> device?.batteryPercentage?.let { "$it%" } ?: element.preview.ifBlank { "86%" }
+    EditorElementType.CALORIES -> element.preview.ifBlank { "326 kcal" }
+    EditorElementType.DISTANCE -> element.preview.ifBlank { "4.6 km" }
+    EditorElementType.SLEEP -> element.preview.ifBlank { "7h 28m" }
+    EditorElementType.WEATHER -> element.preview.ifBlank { "27° • Sunny" }
+    EditorElementType.DIGITAL_NUMBER -> element.preview.ifBlank { "12,345" }
+    EditorElementType.TEXT -> element.preview.ifBlank { "Hello MIIT" }
     else -> element.preview.ifBlank { livePreview(element.type, device) }
 }
