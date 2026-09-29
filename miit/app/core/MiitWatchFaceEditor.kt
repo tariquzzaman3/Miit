@@ -770,6 +770,14 @@ fun MiitWatchFaceEditor(
                     },
                     onExport = { onAction("export") },
                     onBand = {
+                        if (!profile.installSupported) {
+                            Toast.makeText(
+                                context,
+                                "Install blocked: MIIT could not verify this Band as a supported Band 9/10 target.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            return@SubToolBar
+                        }
                         runCatching {
                             MiitNativeWatchfaceCompiler.compile(
                                 context = context,
@@ -2797,14 +2805,23 @@ private fun PhoneCameraSafeArea() {
     }
 }
 
-private data class DeviceProfile(val width: Int, val height: Int, val source: String)
+private data class DeviceProfile(
+    val width: Int,
+    val height: Int,
+    val source: String,
+    val installSupported: Boolean
+)
 
 private fun resolveProfile(device: BandDevice?): DeviceProfile {
     val model = (device?.model ?: device?.name ?: "").lowercase()
     return when {
-        "band 10" in model || "smart band 10" in model -> DeviceProfile(212, 520, "Xiaomi Smart Band 10")
-        "band 9" in model || "smart band 9" in model -> DeviceProfile(192, 490, "Xiaomi Smart Band 9")
-        else -> DeviceProfile(192, 490, "Runtime profile unavailable — verify target device")
+        "band 10" in model || "smart band 10" in model ->
+            DeviceProfile(212, 520, "Xiaomi Smart Band 10", true)
+        "band 9" in model || "smart band 9" in model ->
+            DeviceProfile(192, 490, "Xiaomi Smart Band 9", true)
+        else ->
+            // Keep an editable preview, but never guess a hardware target for installation.
+            DeviceProfile(192, 490, "Runtime profile unavailable — install disabled", false)
     }
 }
 
