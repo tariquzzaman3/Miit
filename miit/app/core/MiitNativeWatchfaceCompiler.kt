@@ -9,6 +9,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.net.Uri
+import androidx.compose.ui.graphics.toArgb
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
@@ -36,7 +37,7 @@ object MiitNativeWatchfaceCompiler {
         val warnings: List<String>
     )
 
-    fun compile(
+    internal fun compile(
         context: Context,
         name: String,
         target: Target,
