@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -1430,17 +1432,29 @@ private fun TransformHandle(
     onClick: (() -> Unit)? = null,
     onDrag: ((Float, Float) -> Unit)? = null
 ) {
-    Box(
-        Modifier.align(alignment).offset(
-            x = if (alignment == Alignment.TopStart || alignment == Alignment.BottomStart) (-9).dp else 9.dp,
-            y = if (alignment == Alignment.TopStart || alignment == Alignment.TopEnd) (-9).dp else 9.dp
-        ).size(20.dp).background(Color(0xFF1E293B), androidx.compose.foundation.shape.CircleShape).then(
-            if (onDrag != null) Modifier.pointerInput(label) {
-                detectDragGestures { change, amount -> change.consume(); onDrag(amount.x, amount.y) }
-            } else Modifier.clickable { onClick?.invoke() }
-        ),
-        contentAlignment = Alignment.Center
-    ) { Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+    Box(Modifier.fillMaxSize()) {
+        Box(
+            Modifier
+                .align(alignment)
+                .offset(
+                    x = if (alignment == Alignment.TopStart || alignment == Alignment.BottomStart) (-9).dp else 9.dp,
+                    y = if (alignment == Alignment.TopStart || alignment == Alignment.TopEnd) (-9).dp else 9.dp
+                )
+                .size(20.dp)
+                .background(Color(0xFF1E293B), androidx.compose.foundation.shape.CircleShape)
+                .then(
+                    if (onDrag != null) Modifier.pointerInput(label) {
+                        detectDragGestures { change, amount ->
+                            change.consume()
+                            onDrag(amount.x, amount.y)
+                        }
+                    } else Modifier.clickable { onClick?.invoke() }
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+    }
 }
 
 @Composable
