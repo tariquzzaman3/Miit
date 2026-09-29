@@ -2813,15 +2813,12 @@ private data class DeviceProfile(
 )
 
 private fun resolveProfile(device: BandDevice?): DeviceProfile {
-    val model = (device?.model ?: device?.name ?: "").lowercase()
-    return when {
-        "band 10" in model || "smart band 10" in model ->
-            DeviceProfile(212, 520, "Xiaomi Smart Band 10", true)
-        "band 9" in model || "smart band 9" in model ->
-            DeviceProfile(192, 490, "Xiaomi Smart Band 9", true)
-        else ->
-            // Keep an editable preview, but never guess a hardware target for installation.
-            DeviceProfile(192, 490, "Runtime profile unavailable — install disabled", false)
+    val target = MiitWatchfaceSafety.supportedTarget(device?.model, device?.name)
+    return if (target != null) {
+        DeviceProfile(target.width, target.height, target.label, true)
+    } else {
+        // Keep an editable preview, but never guess a hardware target for installation.
+        DeviceProfile(192, 490, "Runtime profile unavailable — install disabled", false)
     }
 }
 
