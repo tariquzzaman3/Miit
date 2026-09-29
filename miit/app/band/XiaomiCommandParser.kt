@@ -353,10 +353,7 @@ object XiaomiCommandParser {
             fieldVarint(2, WATCHFACE_INSTALL) +
             fieldBytes(
                 6,
-                fieldBytes(
-                    6,
-                    fieldBytes(1, id.toByteArray(Charsets.UTF_8)) + fieldVarint(2, size)
-                )
+                fieldBytes(1, id.toByteArray(Charsets.UTF_8)) + fieldVarint(2, size)
             )
 
     fun watchfaceSet(id: String): ByteArray =
