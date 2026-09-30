@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="MiitTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">@color/miit_icon_background</item>
+        <item name="android:windowBackground">@color/miit_icon_background</item>
+        <item name="android:statusBarColor">@color/miit_icon_background</item>
+        <item name="android:navigationBarColor">@color/miit_icon_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+
+        <!-- Android 12+ system splash screen -->
+        <item name="android:windowSplashScreenBackground">@color/miit_icon_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/miit_app_icon_inset</item>
+    </style>
+</resources>
