@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Transparent MIIT artwork used as the adaptive-icon/splash foreground. -->
+<!-- Original MIIT blue artwork. No recoloring or vector recreation. -->
 <inset xmlns:android="http://schemas.android.com/apk/res/android"
     android:drawable="@drawable/miit_icon_foreground"
     android:insetLeft="0dp"
