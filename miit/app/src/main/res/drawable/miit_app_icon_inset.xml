@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Preserve the original MIIT artwork unchanged.
+     The 18dp inset leaves roughly the Android adaptive-icon safe area for the artwork. -->
 <inset xmlns:android="http://schemas.android.com/apk/res/android"
-    android:drawable="@drawable/miit_icon_foreground"
-    android:insetLeft="0dp"
-    android:insetTop="0dp"
-    android:insetRight="0dp"
-    android:insetBottom="0dp" />
+    android:drawable="@drawable/Duck-ai-image-2026-09-02-20-07"
+    android:insetLeft="18dp"
+    android:insetTop="18dp"
+    android:insetRight="18dp"
+    android:insetBottom="18dp" />
