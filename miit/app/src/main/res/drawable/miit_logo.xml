@@ -7,7 +7,7 @@
 
     <!-- Full canvas. Artwork is now 472 x 472: exactly 10 px more inset on every side
          than the previous 492 x 492 version. -->
-    <path android:fillColor="#07102F" android:pathData="M0,0h512v512h-512z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M0,0h512v512h-512z" />
 
     <group android:pivotX="256" android:pivotY="256" android:scaleX="0.921875" android:scaleY="0.921875">
         <path android:fillColor="@android:color/transparent" android:strokeColor="#17649A" android:strokeWidth="42" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M184,109 C105,124 76,193 88,286 C99,372 153,422 220,404" />
