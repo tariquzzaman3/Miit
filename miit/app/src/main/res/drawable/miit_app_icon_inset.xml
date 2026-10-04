@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Use the user's exact original artwork without recoloring.
-     21dp inset on every side keeps it within Android's adaptive-icon safe zone. -->
+<!-- Use the exact original artwork without recoloring. Keep it within Android's adaptive-icon safe area. -->
 <inset xmlns:android="http://schemas.android.com/apk/res/android"
-    android:drawable="@drawable/Picsart_26-10-05_02-05-48-392"
+    android:drawable="@drawable/miit_logo_original"
     android:insetLeft="21dp"
     android:insetTop="21dp"
     android:insetRight="21dp"
