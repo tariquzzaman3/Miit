@@ -68,6 +68,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
@@ -895,7 +896,7 @@ fun MiitWatchFaceEditor(
                 }
 
                 Box(
-                    Modifier.width(44.dp).fillMaxHeight()
+                    Modifier.width(58.dp).fillMaxHeight().zIndex(5f)
                 ) {
                     LayerDockButton(
                         onClick = { layersOpen = !layersOpen },
@@ -2377,8 +2378,22 @@ private fun EditorTextLayer(
 
 @Composable
 private fun LayerDockButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Box(modifier.size(44.dp).background(Color(0xFF1B1C21), RoundedCornerShape(13.dp)).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        Text("≡", color = Color.White, fontSize = 22.sp)
+    val shape = RoundedCornerShape(16.dp)
+    Box(
+        modifier = modifier
+            .size(width = 52.dp, height = 56.dp)
+            .background(Color(0xFF31C9B7), shape)
+            .border(1.5.dp, Color.White, shape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("≡", color = Color(0xFF07102F), fontSize = 25.sp, fontWeight = FontWeight.Bold)
+            Text("LAYERS", color = Color(0xFF07102F), fontSize = 7.sp, fontWeight = FontWeight.Bold)
+        }
     }
 }
 
