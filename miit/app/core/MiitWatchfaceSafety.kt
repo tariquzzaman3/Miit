@@ -91,6 +91,20 @@ object MiitWatchfaceSafety {
     )
 
     private val knownTargetProfiles = listOf(
+        target("band11-active", "band11-active", 172, 320,
+            "Xiaomi Smart Band 11 Active", "Xiaomi Smart Band 11 Active", false,
+            "Band 11 Active uses a distinct 172 × 320 px display. Its package format has not been validated by MIIT; preview/save only."),
+        target("band11-ceramic", "band11", 212, 520,
+            "Xiaomi Smart Band 11 Ceramic Edition", "Xiaomi Smart Band 11 Ceramic Edition", false,
+            "Uses the standard Band 11 display profile (212 × 520 px), but Band 11 package compatibility is not yet validated."),
+        target("band11-nfc", "band11", 212, 520,
+            "Xiaomi Smart Band 11 NFC Edition", "Xiaomi Smart Band 11 NFC Edition", false,
+            "Uses the standard Band 11 display profile (212 × 520 px), but Band 11 package compatibility is not yet validated.",
+            "Smart Band 11 NFC", "Xiaomi Smart Band 11 NFC"),
+        target("band11", "band11", 212, 520,
+            "Xiaomi Smart Band 11", "Xiaomi Smart Band 11", false,
+            "Uses the standard Band 11 display profile (212 × 520 px), but Band 11 package compatibility is not yet validated.",
+            "Smart Band 11", "Xiaomi Band 11"),
         target("band10-pro-nfc-ceramic", "band10-pro", 336, 480,
             "Xiaomi Smart Band 10 Pro NFC — Ceramic Edition", "Xiaomi Smart Band 10 Pro NFC Ceramic Edition", false,
             "Pro/Ceramic profile recognised (336 × 480 px), but direct installation is blocked until a Pro-specific package writer is validated.",

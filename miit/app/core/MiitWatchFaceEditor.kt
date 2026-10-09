@@ -952,6 +952,8 @@ fun MiitWatchFaceEditor(
                         referencePath = referencePath,
                         referenceOpacity = referenceOpacity,
                         metadataOnly = display != null,
+                        targetWidth = canvasTargetWidth,
+                        targetHeight = canvasTargetHeight,
                         onSelect = {
                             selectedId = it
                             selectedTool = toolForElement(elements.firstOrNull { element -> element.id == it }?.type)
@@ -1968,6 +1970,8 @@ private fun WatchCanvasV2(
     referencePath: String?,
     referenceOpacity: Float,
     metadataOnly: Boolean,
+    targetWidth: Int = profile.width,
+    targetHeight: Int = profile.height,
     onSelect: (Int) -> Unit,
     onMove: (Int, Float, Float) -> Unit,
     brushMode: Boolean = false,
@@ -1984,7 +1988,7 @@ private fun WatchCanvasV2(
             Box(
                 Modifier
                     .width(190.dp)
-                    .height((190f * canvasTargetHeight / canvasTargetWidth).dp)
+                    .height((190f * targetHeight / targetWidth).dp)
                     .background(Color.Black, RoundedCornerShape(34.dp))
             ) {
                 referencePath?.let { preview ->
@@ -1992,7 +1996,7 @@ private fun WatchCanvasV2(
                 }
                 elements.filter { it.visible }.forEach { element ->
                     val x = (element.x / 100f * 166f).dp
-                    val y = (element.y / 100f * ((190f * canvasTargetHeight / canvasTargetWidth) - 10f)).dp
+                    val y = (element.y / 100f * ((190f * targetHeight / targetWidth) - 10f)).dp
                     when (element.type) {
                         EditorElementType.BRUSH -> EditorBrushLayer(element, element.id == selectedId)
                         EditorElementType.IMAGE -> EditorImageLayer(element, x, y, element.id == selectedId, onSelect, onMove)
@@ -2035,7 +2039,7 @@ private fun WatchCanvasV2(
                     EditorSelectionOverlay(
                         element = selected,
                         canvasWidthDp = 166.dp,
-                        canvasHeightDp = ((190f * canvasTargetHeight / canvasTargetWidth) - 10f).dp,
+                        canvasHeightDp = ((190f * targetHeight / targetWidth) - 10f).dp,
                         onMove = { id, dx, dy -> onMove(id, dx / 1.66f, dy / 4.08f) },
                         onResize = onResize,
                         onRotate = onRotate,
@@ -3070,7 +3074,7 @@ private fun ScreenSetupDialog(
                         onDismissRequest = { regionsExpanded = false },
                         modifier = Modifier.heightIn(max = 240.dp)
                     ) {
-                        listOf("Global / International", "China mainland", "India", "Europe / EEA", "Taiwan", "Other / unknown").forEach { region ->
+                        listOf("Global / International", "China mainland", "India", "Europe / EEA", "Taiwan", "Bangladesh / South Asia", "Other / unknown").forEach { region ->
                             DropdownMenuItem(
                                 text = { Text(region) },
                                 onClick = {
@@ -3104,7 +3108,7 @@ private fun ScreenSetupDialog(
                     )
                 }
                 Text(
-                    "MIIT has editor profiles for Smart Band 7–10, including Pro models and NFC/Ceramic/Glimmer editions. Direct .face installation remains limited to standard Band 9/10 display families; other profiles stay preview/save-only until their package writer is implemented and validated.",
+                    "MIIT has editor profiles for Smart Band 7–11, including Pro models, Band 11 Active, and NFC/Ceramic/Glimmer editions. Direct .face installation remains limited to standard Band 9/10 display families; Band 7/8/11, Pro, and Active profiles stay preview/save-only until the appropriate package writer is validated.",
                     color = Color.Gray,
                     fontSize = 9.sp
                 )
