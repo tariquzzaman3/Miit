@@ -28,14 +28,21 @@ object MiitNativeWatchfaceCompiler {
     data class Target(
         val width: Int,
         val height: Int,
-        val model: String?
+        val model: String?,
+        val countryVariant: String? = null,
+        val format: String = MiitWatchfaceSafety.NATIVE_FORMAT_LABEL
     )
 
     data class Result(
         val id: String,
         val name: String,
         val bytes: ByteArray,
-        val warnings: List<String>
+        val warnings: List<String>,
+        val width: Int = 0,
+        val height: Int = 0,
+        val targetModel: String? = null,
+        val countryVariant: String? = null,
+        val format: String = ""
     )
 
     internal fun compile(
@@ -60,7 +67,24 @@ object MiitNativeWatchfaceCompiler {
             }
         }
 
-        val safeName = name.trim().ifBlank { "MIIT Watch Face" }.take(60)
+        val safeName = MiitWatchfaceSafety.normalizeWatchfaceName(name)
+        val nameErrors = MiitWatchfaceSafety.validateWatchfaceName(safeName)
+        require(nameErrors.isEmpty()) { nameErrors.joinToString(" ") }
+        require(target.format == MiitWatchfaceSafety.NATIVE_FORMAT_LABEL) {
+            "Unsupported face format. MIIT currently builds Xiaomi Smart Band .face packages only."
+        }
+        val modelTarget = target.model?.takeIf { it.isNotBlank() }?.let {
+            MiitWatchfaceSafety.supportedTarget(it, null)
+        }
+        require(modelTarget != null && modelTarget.width == target.width && modelTarget.height == target.height) {
+            "The selected model must match a supported Band 9/10 profile and its exact resolution."
+        }
+        require(
+            (target.width == 192 && target.height == 490) ||
+                (target.width == 212 && target.height == 520)
+        ) {
+            "Unsupported face dimensions. Supported profiles are 192×490 and 212×520."
+        }
         val normalBitmap = render(context, target, elements, darkAod = false)
         val normalImage = encodeImage(normalBitmap)
         normalBitmap.recycle()
@@ -139,7 +163,17 @@ object MiitNativeWatchfaceCompiler {
         }
         warnings += safety.warnings
         warnings += "The current native install path rasterizes the editor into a static full-screen face; on-band widgets are not yet dynamic."
-        return Result(id, safeName, binary, warnings.distinct())
+        return Result(
+            id = id,
+            name = safeName,
+            bytes = binary,
+            warnings = warnings.distinct(),
+            width = target.width,
+            height = target.height,
+            targetModel = target.model,
+            countryVariant = target.countryVariant?.trim()?.takeIf { it.isNotBlank() },
+            format = target.format
+        )
     }
 
     private const val MAIN_HEADER_SIZE = 0xA8

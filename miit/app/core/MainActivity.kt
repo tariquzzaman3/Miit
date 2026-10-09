@@ -276,7 +276,11 @@ private fun MiitApp() {
                         context = context,
                         device = connectedBand,
                         report = report,
-                        requestedId = compiled.id
+                        requestedId = compiled.id,
+                        requestedName = compiled.name,
+                        requestedModel = compiled.targetModel,
+                        requestedCountryVariant = compiled.countryVariant,
+                        requestedFormat = compiled.format
                     )
                     if (!preflight.safe) {
                         Toast.makeText(
@@ -388,7 +392,10 @@ private fun SafetyInstallDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("MIIT will upload only this watch-face package. It does not send firmware or delete commands.")
-                Text("Target: " + (band?.model ?: band?.name ?: "Unknown") + " • " + report.width + "×" + report.height + " px")
+                Text("Screen name: " + result.name)
+                Text("Target: " + (result.targetModel?.takeIf { it.isNotBlank() } ?: band?.model ?: band?.name ?: "Unknown") + " • " + report.width + "×" + report.height + " px")
+                Text("Region/variant: " + result.countryVariant?.takeIf { it.isNotBlank() }.orEmpty().ifBlank { "not verified" })
+                Text("Format: " + result.format)
                 Text("Band battery: " + (band?.batteryPercentage?.toString() ?: "unknown") + "%")
                 Text("Package: " + report.sizeLabel + " • " + report.faceCount + " face(s)")
                 Text("SHA-256: " + report.sha256.take(20) + "…", fontSize = 10.sp)
@@ -531,11 +538,13 @@ private fun BandScreen(
                 val target = WatchfaceProjectStore.readTarget(file)
                 Card(Modifier.fillMaxWidth()) {
                     Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.width(68.dp).height(106.dp).background(Color.Black, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Text("${target.first}×${target.second}", color = Color.Gray, fontSize = 9.sp) }
+                        Box(Modifier.width(68.dp).height(106.dp).background(Color.Black, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+                            Text(if (target.first > 0 && target.second > 0) "${target.first}×${target.second}" else "Target\nnot set", color = Color.Gray, fontSize = 9.sp)
+                        }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             Text(name)
-                            Text("${target.first} × ${target.second} px", color = Color.Gray, fontSize = 9.sp)
+                            Text(if (target.first > 0 && target.second > 0) "${target.first} × ${target.second} px" else "Target resolution not set", color = Color.Gray, fontSize = 9.sp)
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 OutlinedButton(onClick = { onOpenSaved(file) }) { Text("Open") }
                                 OutlinedButton(onClick = { if (file.delete()) onDeleteSaved() }) { Text("Delete") }

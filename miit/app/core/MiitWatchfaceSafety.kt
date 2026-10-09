@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.BatteryManager
 import com.miit.app.band.BandDevice
 import java.security.MessageDigest
+import java.text.Normalizer
 import java.util.Locale
 
 /**
@@ -12,6 +13,13 @@ import java.util.Locale
  * compiler layout; it is not a guarantee for an untested firmware revision.
  */
 object MiitWatchfaceSafety {
+    /**
+     * MIIT's current reverse-engineered native container format identifier.
+     * This label is not an official Xiaomi specification name.
+     */
+    const val NATIVE_FORMAT_LABEL = "Xiaomi Smart Band .face"
+    // Current compiler writes the title to a 60-byte region; reserve a terminating NUL byte.
+    const val MAX_WATCHFACE_NAME_UTF8_BYTES = 59
     const val MIN_BAND_BATTERY_PERCENT = 50
     const val MIN_PHONE_BATTERY_PERCENT = 30
     const val MAX_PACKAGE_BYTES = 4 * 1024 * 1024
@@ -47,6 +55,34 @@ object MiitWatchfaceSafety {
         val height: Int,
         val label: String
     )
+
+    /**
+     * Normalize whitespace and Unicode representation without truncating a title.
+     */
+    fun normalizeWatchfaceName(value: String): String =
+        Normalizer.normalize(value.trim().replace(Regex("\\s+"), " "), Normalizer.Form.NFC)
+
+    /**
+     * Xiaomi does not publish a formal title-character policy for this reverse-engineered
+     * container. MIIT accepts printable Unicode, blocks controls/path-reserved characters,
+     * and validates the UTF-8 byte limit of its current title buffer.
+     */
+    fun validateWatchfaceName(value: String): List<String> {
+        val errors = mutableListOf<String>()
+        if (value.any { ch -> Character.isISOControl(ch) }) {
+            errors += "Screen name cannot contain control characters or line breaks."
+        }
+        val reserved = setOf('/', '\\', ':', '*', '?', '"', '<', '>', '|')
+        val normalized = normalizeWatchfaceName(value)
+        if (normalized.isBlank()) errors += "Enter a screen name before saving or installing."
+        if (normalized.any { ch -> ch in reserved }) {
+            errors += "Avoid reserved filename characters such as slash, backslash, colon, asterisk, question mark, quote, angle brackets, or vertical bar."
+        }
+        if (normalized.toByteArray(Charsets.UTF_8).size > MAX_WATCHFACE_NAME_UTF8_BYTES) {
+            errors += "Screen name must fit within $MAX_WATCHFACE_NAME_UTF8_BYTES UTF-8 bytes for the current Band title field."
+        }
+        return errors.distinct()
+    }
 
     fun supportedTarget(model: String?, name: String?): SupportedTarget? {
         val normalizedModel = normalizeModel(model.orEmpty())
@@ -222,10 +258,18 @@ object MiitWatchfaceSafety {
         context: Context,
         device: BandDevice?,
         report: PackageReport,
-        requestedId: String
+        requestedId: String,
+        requestedName: String? = null,
+        requestedModel: String? = null,
+        requestedCountryVariant: String? = null,
+        requestedFormat: String? = null
     ): PreflightReport {
         val errors = report.errors.toMutableList()
         val warnings = report.warnings.toMutableList()
+        requestedName?.let { errors += validateWatchfaceName(it) }
+        if (requestedFormat != null && requestedFormat != NATIVE_FORMAT_LABEL) {
+            errors += "Unsupported export format. MIIT can directly install only its current Xiaomi .face format."
+        }
 
         if (device == null) errors += "Connected Band identity is unavailable."
         if (device?.connected != true || device.authenticated != true) {
@@ -235,8 +279,25 @@ object MiitWatchfaceSafety {
         val expected = supportedTarget(device?.model, device?.name)
         if (expected == null) {
             errors += "Unsupported or ambiguous Band model. MIIT will never guess a target profile for installation."
-        } else if (report.width != expected.width || report.height != expected.height) {
-            errors += "Package resolution does not match the connected Band."
+        } else {
+            if (report.width != expected.width || report.height != expected.height) {
+                errors += "Package resolution does not match the connected Band."
+            }
+            if (requestedModel.isNullOrBlank()) {
+                errors += "Screen model/profile is blank."
+            } else {
+                val selected = supportedTarget(requestedModel, null)
+                if (selected == null || selected.width != expected.width || selected.height != expected.height) {
+                    errors += "The editable screen model does not match the detected Band profile."
+                }
+            }
+            val detectedVariant = device?.countryVariant?.trim().orEmpty()
+            val requestedVariant = requestedCountryVariant?.trim().orEmpty()
+            if (detectedVariant.isNotBlank() && !requestedVariant.equals(detectedVariant, ignoreCase = true)) {
+                errors += "Screen region/variant must match the connected Band's detected variant."
+            } else if (requestedVariant.isNotBlank() && detectedVariant.isBlank()) {
+                warnings += "The region/variant is user-entered metadata; MIIT cannot verify regional firmware compatibility from that label alone."
+            }
         }
 
         val bandBattery = device?.batteryPercentage
