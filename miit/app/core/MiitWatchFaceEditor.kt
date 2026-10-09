@@ -157,7 +157,6 @@ fun MiitWatchFaceEditor(
         mutableStateOf(
             detectedTarget?.label
                 ?: savedModel.takeIf { it.isNotBlank() && !it.contains("Runtime profile unavailable", ignoreCase = true) }
-                ?: device?.model?.takeIf { it.isNotBlank() }
                 ?: ""
         )
     }
@@ -192,7 +191,7 @@ fun MiitWatchFaceEditor(
     }
     LaunchedEffect(device?.model, device?.name, device?.countryVariant) {
         val latestTarget = MiitWatchfaceSafety.supportedTarget(device?.model, device?.name)
-        if (screenModel.isBlank()) screenModel = latestTarget?.label ?: device?.model.orEmpty()
+        if (screenModel.isBlank()) screenModel = latestTarget?.label.orEmpty()
         if (screenCountryVariant.isBlank()) screenCountryVariant = device?.countryVariant.orEmpty()
         if (screenWidthText.isBlank() && latestTarget != null) screenWidthText = latestTarget.width.toString()
         if (screenHeightText.isBlank() && latestTarget != null) screenHeightText = latestTarget.height.toString()
