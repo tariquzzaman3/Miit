@@ -60,12 +60,7 @@ object MiitNativeWatchfaceCompiler {
             "Unsupported watch-face target " + target.width + "×" + target.height
         }
         val warnings = mutableListOf<String>()
-
-        if (target.width != 192 || target.height != 490) {
-            if (target.width != 212 || target.height != 520) {
-                warnings += "Native install is currently tuned for Smart Band 9 (192×490) and Band 10 (212×520)."
-            }
-        }
+        warnings += "Region and firmware differences are not inferred by the model label; compatibility must be checked for the exact Band variant."
 
         val safeName = MiitWatchfaceSafety.normalizeWatchfaceName(name)
         val nameErrors = MiitWatchfaceSafety.validateWatchfaceName(safeName)
@@ -76,8 +71,13 @@ object MiitNativeWatchfaceCompiler {
         val modelTarget = target.model?.takeIf { it.isNotBlank() }?.let {
             MiitWatchfaceSafety.supportedTarget(it, null)
         }
-        require(modelTarget != null && modelTarget.width == target.width && modelTarget.height == target.height) {
-            "The selected model must match a supported Band 9/10 profile and its exact resolution."
+        require(
+            modelTarget != null &&
+                modelTarget.nativeFaceInstallSupported &&
+                modelTarget.width == target.width &&
+                modelTarget.height == target.height
+        ) {
+            "MIIT's current .face packer is limited to supported standard Band 9/10 profiles. This model is preview/save-only until its model-specific package format is implemented and validated."
         }
         require(
             (target.width == 192 && target.height == 490) ||

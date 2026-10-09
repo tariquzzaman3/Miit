@@ -27,7 +27,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.Executors
 
-/** Discovery and connection state machine for Xiaomi Smart Band 8+/9/10. */
+/** Discovery and connection state machine; hardware family is resolved from protocol/name data when available. */
 class BandScanner(context: Context, initialActivity: Activity? = null) {
     companion object {
         private const val COMPANION_REQUEST_CODE = 7401

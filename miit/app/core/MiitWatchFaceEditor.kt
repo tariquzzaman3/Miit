@@ -37,6 +37,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -147,6 +149,9 @@ fun MiitWatchFaceEditor(
         val stored = savedProject?.let { WatchfaceProjectStore.readTarget(it) } ?: (0 to 0)
         if (savedModel.contains("Runtime profile unavailable", ignoreCase = true)) 0 to 0 else stored
     }
+    val savedFormat = remember(savedProject?.absolutePath) {
+        savedProject?.let { WatchfaceProjectStore.readFormat(it) }.orEmpty()
+    }
     var screenName by remember(editorSessionKey) {
         mutableStateOf(
             display?.name?.takeIf { it.isNotBlank() }
@@ -155,36 +160,33 @@ fun MiitWatchFaceEditor(
     }
     var screenModel by remember(editorSessionKey) {
         mutableStateOf(
-            detectedTarget?.label
-                ?: savedModel.takeIf { it.isNotBlank() && !it.contains("Runtime profile unavailable", ignoreCase = true) }
-                ?: ""
+            savedModel.takeIf { it.isNotBlank() && !it.contains("Runtime profile unavailable", ignoreCase = true) }
+                ?: detectedTarget?.modelValue.orEmpty()
         )
     }
     var screenCountryVariant by remember(editorSessionKey) {
         mutableStateOf(
-            device?.countryVariant?.takeIf { it.isNotBlank() }
-                ?: if (device == null) savedProject?.let { WatchfaceProjectStore.readCountryVariant(it) }.orEmpty() else ""
+            savedProject?.let { WatchfaceProjectStore.readCountryVariant(it) }?.takeIf { it.isNotBlank() }
+                ?: device?.countryVariant?.takeIf { it.isNotBlank() }
+                ?: ""
         )
     }
     var screenWidthText by remember(editorSessionKey) {
         mutableStateOf(
-            detectedTarget?.width?.toString()
-                ?: savedTarget.first.takeIf { it > 0 }?.toString()
+            savedTarget.first.takeIf { it > 0 }?.toString()
+                ?: detectedTarget?.width?.toString()
                 ?: ""
         )
     }
     var screenHeightText by remember(editorSessionKey) {
         mutableStateOf(
-            detectedTarget?.height?.toString()
-                ?: savedTarget.second.takeIf { it > 0 }?.toString()
+            savedTarget.second.takeIf { it > 0 }?.toString()
+                ?: detectedTarget?.height?.toString()
                 ?: ""
         )
     }
     var screenFormat by remember(editorSessionKey) {
-        mutableStateOf(
-            if (detectedTarget != null) MiitWatchfaceSafety.NATIVE_FORMAT_LABEL
-            else savedProject?.let { WatchfaceProjectStore.readFormat(it) }?.takeIf { it.isNotBlank() }.orEmpty()
-        )
+        mutableStateOf(savedFormat.takeIf { it.isNotBlank() } ?: detectedTarget?.formatLabel.orEmpty())
     }
     var screenSetupOpen by remember(editorSessionKey) {
         mutableStateOf(display == null && savedProject == null)
@@ -195,8 +197,10 @@ fun MiitWatchFaceEditor(
         if (screenCountryVariant.isBlank()) screenCountryVariant = device?.countryVariant.orEmpty()
         if (screenWidthText.isBlank() && latestTarget != null) screenWidthText = latestTarget.width.toString()
         if (screenHeightText.isBlank() && latestTarget != null) screenHeightText = latestTarget.height.toString()
-        if (screenFormat.isBlank() && latestTarget != null) screenFormat = MiitWatchfaceSafety.NATIVE_FORMAT_LABEL
+        if (screenFormat.isBlank() && latestTarget != null) screenFormat = latestTarget.formatLabel
     }
+    val canvasTargetWidth = screenWidthText.toIntOrNull()?.takeIf { it in 1..1000 } ?: profile.width
+    val canvasTargetHeight = screenHeightText.toIntOrNull()?.takeIf { it in 1..2000 } ?: profile.height
     val elements = remember(display?.stableId, savedProject?.absolutePath) {
         mutableStateListOf<EditorElement>().apply {
             if (savedProject != null) {
@@ -548,6 +552,13 @@ fun MiitWatchFaceEditor(
             onFormatChange = { screenFormat = it.take(80) },
             detectedModelLabel = detectedTarget?.label,
             detectedCountryVariant = device?.countryVariant?.takeIf { it.isNotBlank() },
+            availableProfiles = MiitWatchfaceSafety.knownTargets(),
+            onChooseProfile = { target ->
+                screenModel = target.modelValue
+                screenWidthText = target.width.toString()
+                screenHeightText = target.height.toString()
+                screenFormat = target.formatLabel
+            },
             onDismiss = { screenSetupOpen = false },
             onApply = {
                 screenName = MiitWatchfaceSafety.normalizeWatchfaceName(screenName)
@@ -1973,7 +1984,7 @@ private fun WatchCanvasV2(
             Box(
                 Modifier
                     .width(190.dp)
-                    .height((190f * profile.height / profile.width).dp)
+                    .height((190f * canvasTargetHeight / canvasTargetWidth).dp)
                     .background(Color.Black, RoundedCornerShape(34.dp))
             ) {
                 referencePath?.let { preview ->
@@ -1981,7 +1992,7 @@ private fun WatchCanvasV2(
                 }
                 elements.filter { it.visible }.forEach { element ->
                     val x = (element.x / 100f * 166f).dp
-                    val y = (element.y / 100f * ((190f * profile.height / profile.width) - 10f)).dp
+                    val y = (element.y / 100f * ((190f * canvasTargetHeight / canvasTargetWidth) - 10f)).dp
                     when (element.type) {
                         EditorElementType.BRUSH -> EditorBrushLayer(element, element.id == selectedId)
                         EditorElementType.IMAGE -> EditorImageLayer(element, x, y, element.id == selectedId, onSelect, onMove)
@@ -2024,7 +2035,7 @@ private fun WatchCanvasV2(
                     EditorSelectionOverlay(
                         element = selected,
                         canvasWidthDp = 166.dp,
-                        canvasHeightDp = ((190f * profile.height / profile.width) - 10f).dp,
+                        canvasHeightDp = ((190f * canvasTargetHeight / canvasTargetWidth) - 10f).dp,
                         onMove = { id, dx, dy -> onMove(id, dx / 1.66f, dy / 4.08f) },
                         onResize = onResize,
                         onRotate = onRotate,
@@ -2964,10 +2975,15 @@ private fun ScreenSetupDialog(
     onFormatChange: (String) -> Unit,
     detectedModelLabel: String?,
     detectedCountryVariant: String?,
+    availableProfiles: List<MiitWatchfaceSafety.SupportedTarget>,
+    onChooseProfile: (MiitWatchfaceSafety.SupportedTarget) -> Unit,
     onDismiss: () -> Unit,
     onApply: () -> Unit
 ) {
+    var profilesExpanded by remember { mutableStateOf(false) }
+    var regionsExpanded by remember { mutableStateOf(false) }
     val nameErrors = MiitWatchfaceSafety.validateWatchfaceName(screenName)
+    val selectedProfile = MiitWatchfaceSafety.supportedTarget(model, null)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Screen setup") },
@@ -2997,12 +3013,49 @@ private fun ScreenSetupDialog(
                     label = { Text("Band model / profile") },
                     singleLine = true
                 )
+                Box(Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { profilesExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Choose a known Band model / edition")
+                    }
+                    DropdownMenu(
+                        expanded = profilesExpanded,
+                        onDismissRequest = { profilesExpanded = false },
+                        modifier = Modifier.heightIn(max = 280.dp)
+                    ) {
+                        availableProfiles.forEach { target ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text(target.label, fontSize = 12.sp)
+                                        Text(
+                                            target.width.toString() + " × " + target.height.toString() + " px • " +
+                                                if (target.nativeFaceInstallSupported) ".face available" else "preview/save only",
+                                            color = Color.Gray,
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    onChooseProfile(target)
+                                    profilesExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
                 Text(
-                    if (detectedModelLabel != null) "Detected profile: $detectedModelLabel"
-                    else "No supported Band model detected. Profile is left blank unless saved metadata is available.",
+                    if (detectedModelLabel != null) "Detected profile: " + detectedModelLabel
+                    else "No recognised model detected. Unknown model details are not guessed.",
                     color = Color.Gray,
                     fontSize = 9.sp
                 )
+                selectedProfile?.let { target ->
+                    Text(
+                        target.compatibilityNote,
+                        color = if (target.nativeFaceInstallSupported) Color(0xFF31C9B7) else Color(0xFFD09B48),
+                        fontSize = 9.sp
+                    )
+                }
                 OutlinedTextField(
                     value = countryVariant,
                     onValueChange = { onCountryVariantChange(it.take(48)) },
@@ -3010,9 +3063,27 @@ private fun ScreenSetupDialog(
                     label = { Text("Country / region variant") },
                     singleLine = true
                 )
+                Box(Modifier.fillMaxWidth()) {
+                    TextButton(onClick = { regionsExpanded = true }) { Text("Choose a common region label") }
+                    DropdownMenu(
+                        expanded = regionsExpanded,
+                        onDismissRequest = { regionsExpanded = false },
+                        modifier = Modifier.heightIn(max = 240.dp)
+                    ) {
+                        listOf("Global / International", "China mainland", "India", "Europe / EEA", "Taiwan", "Other / unknown").forEach { region ->
+                            DropdownMenuItem(
+                                text = { Text(region) },
+                                onClick = {
+                                    onCountryVariantChange(region)
+                                    regionsExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
                 Text(
-                    if (detectedCountryVariant != null) "Detected variant: $detectedCountryVariant"
-                    else "MIIT does not currently receive a verified country-variant value from the Band protocol; this field stays blank until entered.",
+                    if (detectedCountryVariant != null) "Detected variant: " + detectedCountryVariant
+                    else "MIIT cannot verify a country/region value from the Band protocol. This remains blank unless you enter/select one; the label alone cannot prove firmware compatibility.",
                     color = Color.Gray,
                     fontSize = 9.sp
                 )
@@ -3032,7 +3103,11 @@ private fun ScreenSetupDialog(
                         singleLine = true
                     )
                 }
-                Text("Direct install profiles currently supported: 192 × 490 (Band 9) and 212 × 520 (Band 10). Dimensions must match the connected hardware.", color = Color.Gray, fontSize = 9.sp)
+                Text(
+                    "MIIT has editor profiles for Smart Band 7–10, including Pro models and NFC/Ceramic/Glimmer editions. Direct .face installation remains limited to standard Band 9/10 display families; other profiles stay preview/save-only until their package writer is implemented and validated.",
+                    color = Color.Gray,
+                    fontSize = 9.sp
+                )
                 OutlinedTextField(
                     value = format,
                     onValueChange = { onFormatChange(it.take(80)) },
@@ -3069,18 +3144,28 @@ private fun validateInstallSettings(
 ): List<String> {
     val errors = mutableListOf<String>()
     errors += MiitWatchfaceSafety.validateWatchfaceName(name)
-    if (!profile.installSupported) errors += "Install is blocked because MIIT could not verify a supported connected Band 9/10 model."
+    if (!profile.installSupported) {
+        errors += "Direct installation is blocked because the connected Band's package format is not verified by MIIT."
+    }
     val chosenTarget = MiitWatchfaceSafety.supportedTarget(model, null)
     if (chosenTarget == null) {
-        errors += "Choose a recognized Smart Band 9 or Smart Band 10 model/profile."
-    } else if (profile.installSupported && (chosenTarget.width != profile.width || chosenTarget.height != profile.height)) {
-        errors += "Selected model does not match the connected Band's detected profile."
+        errors += "Choose a recognised Smart Band 7–10 profile, including its Pro/edition label, or keep the project preview-only."
+    } else {
+        if (!chosenTarget.nativeFaceInstallSupported) {
+            errors += chosenTarget.label + " is supported for editing and saving, but direct installation is blocked until its model-specific package format is implemented and validated."
+        }
+        if (profile.installSupported &&
+            (chosenTarget.familyId != profile.familyId || chosenTarget.width != profile.width || chosenTarget.height != profile.height)
+        ) {
+            errors += "Selected model does not match the connected Band's detected model family and resolution."
+        }
     }
     if (width == null || height == null) {
         errors += "Enter both screen width and height."
     } else {
-        val supportedPair = (width == 192 && height == 490) || (width == 212 && height == 520)
-        if (!supportedPair) errors += "Unsupported resolution. Use 192 × 490 or 212 × 520 for the supported Band models."
+        val supportedPair = chosenTarget?.nativeFaceInstallSupported == true &&
+            ((width == 192 && height == 490) || (width == 212 && height == 520))
+        if (!supportedPair) errors += "Direct .face installation currently requires the standard Band 9 (192 × 490) or Band 10 (212 × 520) display profile."
         if (profile.installSupported && (width != profile.width || height != profile.height)) {
             errors += "Screen dimensions must match the connected Band's exact resolution."
         }
@@ -3102,16 +3187,17 @@ private data class DeviceProfile(
     val width: Int,
     val height: Int,
     val source: String,
-    val installSupported: Boolean
+    val installSupported: Boolean,
+    val familyId: String? = null
 )
 
 private fun resolveProfile(device: BandDevice?): DeviceProfile {
     val target = MiitWatchfaceSafety.supportedTarget(device?.model, device?.name)
     return if (target != null) {
-        DeviceProfile(target.width, target.height, target.label, true)
+        DeviceProfile(target.width, target.height, target.label, target.nativeFaceInstallSupported, target.familyId)
     } else {
         // Keep an editable preview, but never guess a hardware target for installation.
-        DeviceProfile(192, 490, "Runtime profile unavailable — install disabled", false)
+        DeviceProfile(192, 490, "Runtime profile unavailable — install disabled", false, null)
     }
 }
 

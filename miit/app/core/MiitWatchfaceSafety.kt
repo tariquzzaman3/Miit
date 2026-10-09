@@ -50,11 +50,108 @@ object MiitWatchfaceSafety {
         val warnings: List<String>
     )
 
+    /**
+     * A display profile is not automatically a safe direct-install target.
+     * Only profiles using MIIT's current standard Band 9/10 .face path are enabled.
+     */
     data class SupportedTarget(
+        val id: String,
+        val familyId: String,
         val width: Int,
         val height: Int,
-        val label: String
+        val label: String,
+        val modelValue: String,
+        val nativeFaceInstallSupported: Boolean,
+        val formatLabel: String,
+        val compatibilityNote: String,
+        val aliases: List<String>
     )
+
+    private fun target(
+        id: String,
+        familyId: String,
+        width: Int,
+        height: Int,
+        label: String,
+        modelValue: String,
+        nativeFaceInstallSupported: Boolean,
+        compatibilityNote: String,
+        vararg aliases: String
+    ) = SupportedTarget(
+        id = id,
+        familyId = familyId,
+        width = width,
+        height = height,
+        label = label,
+        modelValue = modelValue,
+        nativeFaceInstallSupported = nativeFaceInstallSupported,
+        formatLabel = if (nativeFaceInstallSupported) NATIVE_FORMAT_LABEL else "Preview only — model-specific package format not implemented",
+        compatibilityNote = compatibilityNote,
+        aliases = (listOf(modelValue, label) + aliases).distinct()
+    )
+
+    private val knownTargetProfiles = listOf(
+        target("band10-pro-nfc-ceramic", "band10-pro", 336, 480,
+            "Xiaomi Smart Band 10 Pro NFC — Ceramic Edition", "Xiaomi Smart Band 10 Pro NFC Ceramic Edition", false,
+            "Pro/Ceramic profile recognised (336 × 480 px), but direct installation is blocked until a Pro-specific package writer is validated.",
+            "Smart Band 10 Pro NFC Ceramic", "Xiaomi Smart Band 10 Pro Ceramic Edition"),
+        target("band10-pro-nfc", "band10-pro", 336, 480,
+            "Xiaomi Smart Band 10 Pro NFC", "Xiaomi Smart Band 10 Pro NFC", false,
+            "Pro profile recognised (336 × 480 px), but the standard-band .face writer is not validated for Pro devices."),
+        target("band10-pro", "band10-pro", 336, 480,
+            "Xiaomi Smart Band 10 Pro", "Xiaomi Smart Band 10 Pro", false,
+            "Pro profile recognised (336 × 480 px), but the standard-band .face writer is not validated for Pro devices."),
+        target("band10-glimmer", "band10", 212, 520,
+            "Xiaomi Smart Band 10 Glimmer Edition", "Xiaomi Smart Band 10 Glimmer Edition", true,
+            "Uses the standard Band 10 display profile (212 × 520 px). Country/firmware compatibility still requires validation."),
+        target("band10-ceramic", "band10", 212, 520,
+            "Xiaomi Smart Band 10 Ceramic Edition", "Xiaomi Smart Band 10 Ceramic Edition", true,
+            "Uses the standard Band 10 display profile (212 × 520 px). Country/firmware compatibility still requires validation."),
+        target("band10-nfc", "band10", 212, 520,
+            "Xiaomi Smart Band 10 NFC Edition", "Xiaomi Smart Band 10 NFC Edition", true,
+            "Uses the standard Band 10 display profile (212 × 520 px). Country/firmware compatibility still requires validation.",
+            "Smart Band 10 NFC", "Xiaomi Smart Band 10 NFC"),
+        target("band10", "band10", 212, 520,
+            "Xiaomi Smart Band 10", "Xiaomi Smart Band 10", true,
+            "Uses MIIT's current standard Band 10 .face writer (212 × 520 px); regional firmware is not inferred from the model label."),
+        target("band9-pro-nfc", "band9-pro", 336, 480,
+            "Xiaomi Smart Band 9 Pro NFC Edition", "Xiaomi Smart Band 9 Pro NFC Edition", false,
+            "Pro profile recognised (336 × 480 px), but direct installation is blocked until a Pro-specific package writer is validated.",
+            "Smart Band 9 Pro NFC", "Xiaomi Smart Band 9 Pro NFC"),
+        target("band9-pro", "band9-pro", 336, 480,
+            "Xiaomi Smart Band 9 Pro", "Xiaomi Smart Band 9 Pro", false,
+            "Pro profile recognised (336 × 480 px), but the standard-band .face writer is not validated for Pro devices."),
+        target("band9-nfc", "band9", 192, 490,
+            "Xiaomi Smart Band 9 NFC Edition", "Xiaomi Smart Band 9 NFC Edition", true,
+            "Uses the standard Band 9 display profile (192 × 490 px). Country/firmware compatibility still requires validation.",
+            "Smart Band 9 NFC", "Xiaomi Smart Band 9 NFC"),
+        target("band9", "band9", 192, 490,
+            "Xiaomi Smart Band 9", "Xiaomi Smart Band 9", true,
+            "Uses MIIT's current standard Band 9 .face writer (192 × 490 px); regional firmware is not inferred from the model label."),
+        target("band8-pro", "band8-pro", 336, 480,
+            "Xiaomi Smart Band 8 Pro", "Xiaomi Smart Band 8 Pro", false,
+            "Pro profile recognised (336 × 480 px), but the standard-band .face writer is not validated for Pro devices."),
+        target("band8-nfc", "band8", 192, 490,
+            "Xiaomi Smart Band 8 NFC Edition", "Xiaomi Smart Band 8 NFC Edition", false,
+            "Editor profile recognised (192 × 490 px), but Band 8 package compatibility has not been validated by MIIT.",
+            "Smart Band 8 NFC", "Xiaomi Smart Band 8 NFC"),
+        target("band8", "band8", 192, 490,
+            "Xiaomi Smart Band 8", "Xiaomi Smart Band 8", false,
+            "Editor profile recognised (192 × 490 px), but Band 8 package compatibility has not been validated by MIIT."),
+        target("band7-pro", "band7-pro", 280, 456,
+            "Xiaomi Smart Band 7 Pro", "Xiaomi Smart Band 7 Pro", false,
+            "Pro profile recognised (280 × 456 px), but Band 7 Pro needs a different package path that MIIT has not implemented."),
+        target("band7-nfc", "band7", 192, 490,
+            "Xiaomi Smart Band 7 NFC Edition", "Xiaomi Smart Band 7 NFC Edition", false,
+            "Editor profile recognised (192 × 490 px), but Band 7 uses a different package path that MIIT has not implemented.",
+            "Mi Smart Band 7 NFC", "Smart Band 7 NFC", "Xiaomi Smart Band 7 NFC"),
+        target("band7", "band7", 192, 490,
+            "Xiaomi Smart Band 7", "Xiaomi Smart Band 7", false,
+            "Editor profile recognised (192 × 490 px), but Band 7 uses a different package path that MIIT has not implemented.",
+            "Mi Smart Band 7", "Smart Band 7")
+    )
+
+    fun knownTargets(): List<SupportedTarget> = knownTargetProfiles.toList()
 
     /**
      * Normalize whitespace and Unicode representation without truncating a title.
@@ -87,15 +184,23 @@ object MiitWatchfaceSafety {
     fun supportedTarget(model: String?, name: String?): SupportedTarget? {
         val normalizedModel = normalizeModel(model.orEmpty())
         val normalizedName = normalizeModel(name.orEmpty())
-        // When the firmware exposes a human-readable model, treat it as authoritative.
-        // Only fall back to the Bluetooth name when the model field is an opaque identifier.
+        // Prefer a readable model field. Bluetooth names are fallback only when model is opaque.
         val candidate = if (normalizedModel.contains("band")) normalizedModel else normalizedName
-        return when {
-            candidate.matches(Regex("^(xiaomi )?smart band 10( nfc| ceramic edition| glimmer edition)?$")) ->
-                SupportedTarget(212, 520, "Xiaomi Smart Band 10")
-            candidate.matches(Regex("^(xiaomi )?smart band 9( nfc)?$")) ->
-                SupportedTarget(192, 490, "Xiaomi Smart Band 9")
-            else -> null
+        val candidateForms = listOf(candidate, candidate.removePrefix("xiaomi "), candidate.removePrefix("mi "))
+        return knownTargetProfiles.firstOrNull { profile ->
+            profile.aliases.any { alias ->
+                val normalizedAlias = normalizeModel(alias)
+                val aliasForms = listOf(
+                    normalizedAlias,
+                    normalizedAlias.removePrefix("xiaomi "),
+                    normalizedAlias.removePrefix("mi ")
+                )
+                candidateForms.any { candidateForm ->
+                    aliasForms.any { aliasForm ->
+                        candidateForm == aliasForm || candidateForm.startsWith("$aliasForm ")
+                    }
+                }
+            }
         }
     }
 
@@ -229,10 +334,10 @@ object MiitWatchfaceSafety {
                     }
                 }
 
-                if ((detectedWidth != 212 || detectedHeight != 520) &&
-                    (detectedWidth != 192 || detectedHeight != 490)
+                if (!((detectedWidth == 212 && detectedHeight == 520) ||
+                    (detectedWidth == 192 && detectedHeight == 490))
                 ) {
-                    errors += "Unsupported watch-face resolution."
+                    errors += "Unsupported watch-face resolution for MIIT's current .face installer."
                 }
                 if (faceCount == 2) {
                     warnings += "AOD is enabled. Xiaomi documents higher AOD power use and possible flicker on large AOD areas."
@@ -280,6 +385,9 @@ object MiitWatchfaceSafety {
         if (expected == null) {
             errors += "Unsupported or ambiguous Band model. MIIT will never guess a target profile for installation."
         } else {
+            if (!expected.nativeFaceInstallSupported) {
+                errors += "Direct installation is blocked for " + expected.label + ": " + expected.compatibilityNote
+            }
             if (report.width != expected.width || report.height != expected.height) {
                 errors += "Package resolution does not match the connected Band."
             }
@@ -287,8 +395,11 @@ object MiitWatchfaceSafety {
                 errors += "Screen model/profile is blank."
             } else {
                 val selected = supportedTarget(requestedModel, null)
-                if (selected == null || selected.width != expected.width || selected.height != expected.height) {
-                    errors += "The editable screen model does not match the detected Band profile."
+                if (selected == null || !selected.nativeFaceInstallSupported ||
+                    selected.familyId != expected.familyId ||
+                    selected.width != expected.width || selected.height != expected.height
+                ) {
+                    errors += "The editable model/profile must use the same supported native-format family and exact resolution as the detected Band."
                 }
             }
             val detectedVariant = device?.countryVariant?.trim().orEmpty()
